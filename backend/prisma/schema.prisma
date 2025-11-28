@@ -35,11 +35,48 @@ model User {
 }
 
 model UserPreferences {
-  id             String   @id @default(uuid())
-  userId         String   @unique
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  theme          String   @default("light")
-  datetimeFormat String   @default("ISO")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  theme           String   @default("light")
+  datetimeFormat  String   @default("ISO")
+  mapPreferences  String?  // JSON string for map preferences (colors, etc.)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model SavedPlace {
+  id          String   @id @default(uuid())
+  userId      String
+  name        String
+  lon         Float
+  lat         Float
+  icon        String   @default("📍")
+  color       String   @default("#ef4444")
+  geojson     String?  // Full GeoJSON content if needed
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model SavedRoute {
+  id          String   @id @default(uuid())
+  userId      String
+  name        String
+  originName  String
+  originLon   Float
+  originLat   Float
+  destName    String
+  destLon     Float
+  destLat     Float
+  stops       String?  // JSON array of stops
+  distance    String
+  duration    String
+  coordinates String   // JSON array of route coordinates
+  geojson     String?  // Full GeoJSON content if needed
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
 }

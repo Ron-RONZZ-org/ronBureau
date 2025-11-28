@@ -60,21 +60,30 @@
 
           <!-- Directions Search -->
           <div v-if="searchMode === 'directions'" class="search-section">
+            <!-- Action Buttons Row -->
+            <div class="action-buttons-row">
+              <button class="action-btn" @click="useCurrentLocationFor('origin')" :disabled="isGettingLocation" title="Use my location">
+                📍 My Location
+              </button>
+              <button class="action-btn" :class="{ active: pickPointMode === 'origin' }" @click="togglePickPoint('origin')" title="Pick point on map">
+                🗺️ Pick on Map
+              </button>
+              <button class="action-btn" @click="showSavedPlacesModal('origin')" title="Pick from saved places">
+                📌 Saved Places
+              </button>
+            </div>
+
             <div class="input-group">
               <label for="origin">Origin</label>
-              <div class="input-with-button">
-                <input
-                  id="origin"
-                  v-model="originQuery"
-                  type="text"
-                  class="input"
-                  placeholder="Starting point..."
-                  @input="debouncedSearchOrigin"
-                />
-                <button class="btn btn-outline btn-sm use-location-btn" @click="useCurrentLocationAsOrigin" :disabled="isGettingLocation" title="Use current location">
-                  📍
-                </button>
-              </div>
+              <input
+                id="origin"
+                v-model="originQuery"
+                type="text"
+                class="input"
+                :class="{ 'pick-mode': pickPointMode === 'origin' }"
+                placeholder="Starting point..."
+                @input="debouncedSearchOrigin"
+              />
             </div>
             <div v-if="originResults.length > 0 && showOriginResults" class="search-results">
               <div
@@ -92,9 +101,47 @@
             </div>
 
             <!-- Intermediary Stops -->
-            <div v-if="stops.length > 0" class="stops-section">
-              <label>Stops</label>
-              <div class="stops-list">
+            <div class="stops-section">
+              <div class="stops-header">
+                <label>Stops</label>
+                <div class="stop-action-buttons">
+                  <button class="action-btn-sm" @click="useCurrentLocationFor('stop')" :disabled="isGettingLocation" title="Use my location">
+                    📍
+                  </button>
+                  <button class="action-btn-sm" :class="{ active: pickPointMode === 'stop' }" @click="togglePickPoint('stop')" title="Pick point on map">
+                    🗺️
+                  </button>
+                  <button class="action-btn-sm" @click="showSavedPlacesModal('stop')" title="Pick from saved places">
+                    📌
+                  </button>
+                </div>
+              </div>
+              <div class="input-group">
+                <input
+                  v-model="stopQuery"
+                  type="text"
+                  class="input"
+                  :class="{ 'pick-mode': pickPointMode === 'stop' }"
+                  placeholder="Add a stop..."
+                  @input="debouncedSearchStop"
+                  @keyup.enter="addStopFromSearch"
+                />
+              </div>
+              <div v-if="stopResults.length > 0 && showStopResults" class="search-results">
+                <div
+                  v-for="(result, index) in stopResults"
+                  :key="index"
+                  class="search-result-item"
+                  @click="selectStop(result)"
+                >
+                  <span class="result-icon">🟡</span>
+                  <div class="result-info">
+                    <span class="result-name">{{ result.name }}</span>
+                    <span class="result-address">{{ result.address }}</span>
+                  </div>
+                </div>
+              </div>
+              <div v-if="stops.length > 0" class="stops-list">
                 <div 
                   v-for="(stop, index) in stops" 
                   :key="stop.id"
@@ -120,9 +167,19 @@
                 </div>
               </div>
             </div>
-            <button class="btn btn-outline btn-sm w-full" @click="addStopMode = !addStopMode">
-              {{ addStopMode ? '✓ Click map to add stop' : '+ Add Stop' }}
-            </button>
+
+            <!-- Destination Action Buttons -->
+            <div class="action-buttons-row">
+              <button class="action-btn" @click="useCurrentLocationFor('destination')" :disabled="isGettingLocation" title="Use my location">
+                📍 My Location
+              </button>
+              <button class="action-btn" :class="{ active: pickPointMode === 'destination' }" @click="togglePickPoint('destination')" title="Pick point on map">
+                🗺️ Pick on Map
+              </button>
+              <button class="action-btn" @click="showSavedPlacesModal('destination')" title="Pick from saved places">
+                📌 Saved Places
+              </button>
+            </div>
 
             <div class="input-group">
               <label for="destination">Destination</label>
@@ -131,6 +188,7 @@
                 v-model="destinationQuery"
                 type="text"
                 class="input"
+                :class="{ 'pick-mode': pickPointMode === 'destination' }"
                 placeholder="Destination..."
                 @input="debouncedSearchDestination"
               />
@@ -180,12 +238,13 @@
             <div v-else class="saved-list">
               <div
                 v-for="(place, index) in savedPlaces"
-                :key="index"
+                :key="place.id || index"
                 class="saved-item"
                 @click="goToPlace(place)"
               >
                 <span class="saved-icon" :style="{ color: place.color || customization.placeMarkerColor }">{{ place.icon || '📍' }}</span>
                 <span class="saved-name">{{ place.name }}</span>
+                <button class="edit-btn" @click.stop="editPlace(place, index)" title="Edit place">✏️</button>
                 <button class="remove-btn" @click.stop="removePlace(index)">×</button>
               </div>
             </div>
@@ -203,12 +262,13 @@
             <div v-else class="saved-list">
               <div
                 v-for="(route, index) in savedRoutes"
-                :key="index"
+                :key="route.id || index"
                 class="saved-item"
                 @click="loadRoute(route)"
               >
                 <span class="saved-icon">🛤️</span>
                 <span class="saved-name">{{ route.name }}</span>
+                <button class="edit-btn" @click.stop="editRoute(route, index)" title="Edit route">✏️</button>
                 <button class="remove-btn" @click.stop="removeRoute(index)">×</button>
               </div>
             </div>
@@ -242,7 +302,10 @@
 
           <!-- Customization Section -->
           <div class="customization-section">
-            <h3>🎨 Customization</h3>
+            <div class="customization-header">
+              <h3>🎨 Customization</h3>
+              <button class="btn btn-outline btn-sm" @click="showPreferencesModal = true" title="Open preferences">⚙️</button>
+            </div>
             <div class="color-option">
               <label>Place Marker Color:</label>
               <input type="color" v-model="customization.placeMarkerColor" @change="updateMarkerColors" />
@@ -279,10 +342,25 @@
               <input id="pdf-title" v-model="pdfOptions.title" type="text" class="input" placeholder="Enter map title..." />
             </div>
             <div class="input-group">
+              <label for="pdf-size">Page Size</label>
+              <select id="pdf-size" v-model="pdfOptions.pageSize" class="select">
+                <option value="a4">A4</option>
+                <option value="a3">A3</option>
+              </select>
+            </div>
+            <div class="input-group">
               <label for="pdf-scale">Scale</label>
               <select id="pdf-scale" v-model="pdfOptions.scale" class="select">
                 <option value="auto">Auto (fit to page)</option>
                 <option value="custom">Current View</option>
+              </select>
+            </div>
+            <div class="input-group">
+              <label for="pdf-export-type">Export Content</label>
+              <select id="pdf-export-type" v-model="pdfOptions.exportContent" class="select">
+                <option value="both">Both (Places & Routes)</option>
+                <option value="places">Places Only</option>
+                <option value="routes">Routes Only</option>
               </select>
             </div>
             <div class="checkbox-group">
@@ -293,6 +371,99 @@
             <div class="modal-buttons">
               <button class="btn btn-outline" @click="showPdfExportModal = false">Cancel</button>
               <button class="btn btn-primary" @click="exportPdfMap">Export PDF</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- User Preferences Modal -->
+        <div v-if="showPreferencesModal" class="modal-overlay" @click.self="showPreferencesModal = false">
+          <div class="modal-content">
+            <h3>⚙️ Map Preferences</h3>
+            <p class="modal-description">Set your default map preferences. These will be saved and restored when you visit the maps page.</p>
+            <div class="color-option">
+              <label>Default Place Marker Color:</label>
+              <input type="color" v-model="preferencesForm.placeMarkerColor" />
+            </div>
+            <div class="color-option">
+              <label>Default Route Color:</label>
+              <input type="color" v-model="preferencesForm.routeColor" />
+            </div>
+            <div class="modal-buttons">
+              <button class="btn btn-outline" @click="showPreferencesModal = false">Cancel</button>
+              <button class="btn btn-primary" @click="savePreferences" :disabled="isSavingPreferences">
+                {{ isSavingPreferences ? 'Saving...' : 'Save Preferences' }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Edit Place Modal -->
+        <div v-if="showEditPlaceModal" class="modal-overlay" @click.self="showEditPlaceModal = false">
+          <div class="modal-content">
+            <h3>✏️ Edit Place</h3>
+            <div class="input-group">
+              <label for="edit-place-name">Name</label>
+              <input id="edit-place-name" v-model="editPlaceForm.name" type="text" class="input" placeholder="Place name..." />
+            </div>
+            <div class="color-option">
+              <label>Icon:</label>
+              <select v-model="editPlaceForm.icon" class="select select-sm">
+                <option value="📍">📍 Pin</option>
+                <option value="⭐">⭐ Star</option>
+                <option value="🏠">🏠 Home</option>
+                <option value="🏢">🏢 Building</option>
+                <option value="🎯">🎯 Target</option>
+                <option value="❤️">❤️ Heart</option>
+                <option value="🔵">🔵 Blue</option>
+                <option value="🔴">🔴 Red</option>
+              </select>
+            </div>
+            <div class="color-option">
+              <label>Color:</label>
+              <input type="color" v-model="editPlaceForm.color" />
+            </div>
+            <div class="modal-buttons">
+              <button class="btn btn-outline" @click="showEditPlaceModal = false">Cancel</button>
+              <button class="btn btn-primary" @click="saveEditedPlace">Save</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Edit Route Modal -->
+        <div v-if="showEditRouteModal" class="modal-overlay" @click.self="showEditRouteModal = false">
+          <div class="modal-content">
+            <h3>✏️ Edit Route</h3>
+            <div class="input-group">
+              <label for="edit-route-name">Name</label>
+              <input id="edit-route-name" v-model="editRouteForm.name" type="text" class="input" placeholder="Route name..." />
+            </div>
+            <div class="modal-buttons">
+              <button class="btn btn-outline" @click="showEditRouteModal = false">Cancel</button>
+              <button class="btn btn-primary" @click="saveEditedRoute">Save</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Saved Places Picker Modal -->
+        <div v-if="showSavedPlacesPickerModal" class="modal-overlay" @click.self="showSavedPlacesPickerModal = false">
+          <div class="modal-content">
+            <h3>📌 Select a Saved Place</h3>
+            <div v-if="savedPlaces.length === 0" class="no-saved">
+              <p>No saved places available</p>
+            </div>
+            <div v-else class="picker-list">
+              <div
+                v-for="(place, index) in savedPlaces"
+                :key="place.id || index"
+                class="picker-item"
+                @click="selectSavedPlaceFor(place)"
+              >
+                <span class="saved-icon" :style="{ color: place.color || customization.placeMarkerColor }">{{ place.icon || '📍' }}</span>
+                <span class="saved-name">{{ place.name }}</span>
+              </div>
+            </div>
+            <div class="modal-buttons">
+              <button class="btn btn-outline" @click="showSavedPlacesPickerModal = false">Cancel</button>
             </div>
           </div>
         </div>
@@ -327,6 +498,7 @@ interface PlaceResult {
 }
 
 interface SavedPlace {
+  id?: string;
   name: string;
   lon: number;
   lat: number;
@@ -389,7 +561,16 @@ const currentRouteCoordinates = ref<number[][]>([]);
 
 // Stops for intermediary points
 const stops = ref<Stop[]>([]);
-const addStopMode = ref(false);
+const stopQuery = ref('');
+const stopResults = ref<PlaceResult[]>([]);
+const showStopResults = ref(false);
+
+// Pick point mode
+const pickPointMode = ref<'origin' | 'stop' | 'destination' | null>(null);
+
+// Saved places picker modal
+const showSavedPlacesPickerModal = ref(false);
+const savedPlacesPickerTarget = ref<'origin' | 'stop' | 'destination' | null>(null);
 
 // Status message state
 const statusMessage = ref('');
@@ -406,7 +587,9 @@ const exportType = ref<'both' | 'places' | 'routes'>('both');
 const showPdfExportModal = ref(false);
 const pdfOptions = ref({
   title: 'Map Export',
+  pageSize: 'a4' as 'a4' | 'a3',
   scale: 'auto',
+  exportContent: 'both' as 'both' | 'places' | 'routes',
   showLegend: true,
   showScaleBar: true,
   showNorthPointer: true,
@@ -420,6 +603,30 @@ const currentLocation = ref<{ lon: number; lat: number } | null>(null);
 const customization = ref({
   placeMarkerColor: '#ef4444', // default red
   routeColor: '#22c55e', // default green
+});
+
+// User Preferences Modal
+const showPreferencesModal = ref(false);
+const isSavingPreferences = ref(false);
+const preferencesForm = ref({
+  placeMarkerColor: '#ef4444',
+  routeColor: '#22c55e',
+});
+
+// Edit Place Modal
+const showEditPlaceModal = ref(false);
+const editPlaceIndex = ref<number | null>(null);
+const editPlaceForm = ref({
+  name: '',
+  icon: '📍',
+  color: '#ef4444',
+});
+
+// Edit Route Modal
+const showEditRouteModal = ref(false);
+const editRouteIndex = ref<number | null>(null);
+const editRouteForm = ref({
+  name: '',
 });
 
 // Show status message helper
@@ -544,6 +751,90 @@ async function useCurrentLocationAsOrigin() {
   }
 }
 
+// Use current location for origin/stop/destination
+async function useCurrentLocationFor(target: 'origin' | 'stop' | 'destination') {
+  isGettingLocation.value = true;
+  try {
+    const location = await getCurrentLocation();
+    const place: PlaceResult = {
+      name: 'My Location',
+      address: `${location.lat.toFixed(5)}, ${location.lon.toFixed(5)}`,
+      lon: location.lon,
+      lat: location.lat,
+    };
+    
+    if (target === 'origin') {
+      selectOrigin(place);
+      showStatus('Using current location as origin', 'success');
+    } else if (target === 'stop') {
+      const newStop: Stop = {
+        id: generateId(),
+        name: place.name,
+        lon: place.lon,
+        lat: place.lat,
+      };
+      stops.value.push(newStop);
+      addDirectionMarker(place.lon, place.lat, 'stop', stops.value.length - 1);
+      showStatus('Stop added from current location', 'success');
+    } else {
+      selectDestination(place);
+      showStatus('Using current location as destination', 'success');
+    }
+  } catch {
+    showStatus('Could not get your location', 'error');
+  } finally {
+    isGettingLocation.value = false;
+  }
+}
+
+// Toggle pick point on map mode
+function togglePickPoint(target: 'origin' | 'stop' | 'destination') {
+  if (pickPointMode.value === target) {
+    pickPointMode.value = null;
+  } else {
+    pickPointMode.value = target;
+    showStatus(`Click on the map to set ${target}`, 'success');
+  }
+}
+
+// Show saved places modal for selection
+function showSavedPlacesModal(target: 'origin' | 'stop' | 'destination') {
+  savedPlacesPickerTarget.value = target;
+  showSavedPlacesPickerModal.value = true;
+}
+
+// Select a saved place for origin/stop/destination
+function selectSavedPlaceFor(place: SavedPlace) {
+  const target = savedPlacesPickerTarget.value;
+  if (!target) return;
+  
+  const placeResult: PlaceResult = {
+    name: place.name,
+    address: '',
+    lon: place.lon,
+    lat: place.lat,
+  };
+  
+  if (target === 'origin') {
+    selectOrigin(placeResult);
+  } else if (target === 'stop') {
+    const newStop: Stop = {
+      id: generateId(),
+      name: place.name,
+      lon: place.lon,
+      lat: place.lat,
+    };
+    stops.value.push(newStop);
+    addDirectionMarker(place.lon, place.lat, 'stop', stops.value.length - 1);
+  } else {
+    selectDestination(placeResult);
+  }
+  
+  showSavedPlacesPickerModal.value = false;
+  savedPlacesPickerTarget.value = null;
+  showStatus(`${place.name} selected as ${target}`, 'success');
+}
+
 // Search places using Photon API
 async function searchPlaces(query: string): Promise<PlaceResult[]> {
   if (!query.trim()) return [];
@@ -607,6 +898,34 @@ const debouncedSearchDestination = debounce(async () => {
   destinationResults.value = await searchPlaces(destinationQuery.value);
 }, 300);
 
+const debouncedSearchStop = debounce(async () => {
+  showStopResults.value = true;
+  stopResults.value = await searchPlaces(stopQuery.value);
+}, 300);
+
+// Select stop from search results
+function selectStop(place: PlaceResult) {
+  const newStop: Stop = {
+    id: generateId(),
+    name: place.name,
+    lon: place.lon,
+    lat: place.lat,
+  };
+  stops.value.push(newStop);
+  addDirectionMarker(place.lon, place.lat, 'stop', stops.value.length - 1);
+  stopQuery.value = '';
+  stopResults.value = [];
+  showStopResults.value = false;
+  showStatus('Stop added!', 'success');
+}
+
+// Add stop from search input on enter
+function addStopFromSearch() {
+  if (stopResults.value.length > 0) {
+    selectStop(stopResults.value[0]);
+  }
+}
+
 // Select place from search results
 function selectPlace(place: PlaceResult) {
   placeResults.value = [];
@@ -642,6 +961,7 @@ function selectOrigin(place: PlaceResult) {
   originQuery.value = place.name;
   originResults.value = [];
   showOriginResults.value = false;
+  pickPointMode.value = null;
   addDirectionMarker(place.lon, place.lat, 'origin');
 }
 
@@ -650,6 +970,7 @@ function selectDestination(place: PlaceResult) {
   destinationQuery.value = place.name;
   destinationResults.value = [];
   showDestinationResults.value = false;
+  pickPointMode.value = null;
   addDirectionMarker(place.lon, place.lat, 'destination');
 }
 
@@ -959,6 +1280,53 @@ function removeRoute(index: number) {
   saveToLocalStorage();
 }
 
+// Edit place
+function editPlace(place: SavedPlace, index: number) {
+  editPlaceIndex.value = index;
+  editPlaceForm.value = {
+    name: place.name,
+    icon: place.icon || '📍',
+    color: place.color || customization.value.placeMarkerColor,
+  };
+  showEditPlaceModal.value = true;
+}
+
+function saveEditedPlace() {
+  if (editPlaceIndex.value === null) return;
+  
+  const place = savedPlaces.value[editPlaceIndex.value];
+  place.name = editPlaceForm.value.name;
+  place.icon = editPlaceForm.value.icon;
+  place.color = editPlaceForm.value.color;
+  
+  saveToLocalStorage();
+  refreshMarkersFromSaved();
+  showEditPlaceModal.value = false;
+  editPlaceIndex.value = null;
+  showStatus('Place updated!', 'success');
+}
+
+// Edit route
+function editRoute(route: SavedRoute, index: number) {
+  editRouteIndex.value = index;
+  editRouteForm.value = {
+    name: route.name,
+  };
+  showEditRouteModal.value = true;
+}
+
+function saveEditedRoute() {
+  if (editRouteIndex.value === null) return;
+  
+  const route = savedRoutes.value[editRouteIndex.value];
+  route.name = editRouteForm.value.name;
+  
+  saveToLocalStorage();
+  showEditRouteModal.value = false;
+  editRouteIndex.value = null;
+  showStatus('Route updated!', 'success');
+}
+
 function clearAllPlaces() {
   savedPlaces.value = [];
   saveToLocalStorage();
@@ -1065,6 +1433,80 @@ function loadFromLocalStorage() {
   }
 }
 
+// Load map preferences from API
+async function loadMapPreferencesFromAPI() {
+  if (!auth.isAuthenticated || !auth.token) return;
+  
+  try {
+    const response = await $fetch<{ placeMarkerColor?: string; routeColor?: string }>(
+      `${config.public.apiBase}/maps/preferences`,
+      {
+        headers: {
+          Authorization: `Bearer ${auth.token}`,
+        },
+      }
+    );
+    
+    if (response.placeMarkerColor) {
+      customization.value.placeMarkerColor = response.placeMarkerColor;
+    }
+    if (response.routeColor) {
+      customization.value.routeColor = response.routeColor;
+    }
+    
+    // Update the preferences form as well
+    preferencesForm.value = {
+      placeMarkerColor: customization.value.placeMarkerColor,
+      routeColor: customization.value.routeColor,
+    };
+    
+    // Also save to localStorage for offline use
+    saveCustomizationToLocalStorage();
+  } catch (error) {
+    console.error('Failed to load map preferences from API:', error);
+    // Fall back to localStorage
+  }
+}
+
+// Save preferences to API
+async function savePreferences() {
+  if (!auth.isAuthenticated || !auth.token) {
+    showStatus('Please log in to save preferences', 'error');
+    return;
+  }
+  
+  isSavingPreferences.value = true;
+  
+  try {
+    await $fetch(`${config.public.apiBase}/maps/preferences`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+      },
+      body: preferencesForm.value,
+    });
+    
+    // Update local customization
+    customization.value.placeMarkerColor = preferencesForm.value.placeMarkerColor;
+    customization.value.routeColor = preferencesForm.value.routeColor;
+    
+    // Save to localStorage as well
+    saveCustomizationToLocalStorage();
+    
+    // Refresh markers with new colors
+    refreshMarkersFromSaved();
+    updateRouteColor();
+    
+    showPreferencesModal.value = false;
+    showStatus('Preferences saved!', 'success');
+  } catch (error) {
+    console.error('Failed to save preferences:', error);
+    showStatus('Failed to save preferences', 'error');
+  } finally {
+    isSavingPreferences.value = false;
+  }
+}
+
 // Record last accessed tool
 function recordLastAccessed() {
   if (import.meta.client) {
@@ -1167,16 +1609,63 @@ async function exportPdfMap() {
   showStatus('Generating PDF...', 'success');
   
   try {
+    // Temporarily hide current location marker for PDF export
+    if (currentLocationSource) {
+      currentLocationSource.clear();
+    }
+    
+    // Wait for the map to re-render without the location marker
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Temporarily filter markers based on export content setting
+    const originalMarkersState: { feature: Feature; visible: boolean }[] = [];
+    const originalRouteState: { feature: Feature; visible: boolean }[] = [];
+    
+    if (markersSource && pdfOptions.value.exportContent !== 'both') {
+      markersSource.getFeatures().forEach((f) => {
+        const featureType = f.get('type');
+        if (pdfOptions.value.exportContent === 'routes' && featureType === 'place') {
+          originalMarkersState.push({ feature: f, visible: true });
+          markersSource?.removeFeature(f);
+        }
+      });
+    }
+    
+    if (routeSource && pdfOptions.value.exportContent === 'places') {
+      routeSource.getFeatures().forEach((f) => {
+        originalRouteState.push({ feature: f, visible: true });
+        routeSource?.removeFeature(f);
+      });
+    }
+    
+    // Wait for changes to render
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
     const mapCanvas = map.getViewport().querySelector('canvas');
     if (!mapCanvas) {
       showStatus('Could not capture map', 'error');
       return;
     }
     
+    // Create a higher resolution export canvas
+    const exportCanvas = document.createElement('canvas');
+    const scale = 2; // Higher resolution for better quality
+    exportCanvas.width = mapCanvas.width * scale;
+    exportCanvas.height = mapCanvas.height * scale;
+    const ctx = exportCanvas.getContext('2d');
+    if (!ctx) {
+      showStatus('Could not create export canvas', 'error');
+      return;
+    }
+    
+    // Draw the map canvas onto the export canvas with scaling
+    ctx.scale(scale, scale);
+    ctx.drawImage(mapCanvas, 0, 0);
+    
     const pdf = new jsPDF({
       orientation: 'landscape',
       unit: 'mm',
-      format: 'a4',
+      format: pdfOptions.value.pageSize,
     });
     
     const pageWidth = pdf.internal.pageSize.getWidth();
@@ -1185,25 +1674,38 @@ async function exportPdfMap() {
     
     // Add title
     if (pdfOptions.value.title) {
-      pdf.setFontSize(16);
+      pdf.setFontSize(pdfOptions.value.pageSize === 'a3' ? 20 : 16);
       pdf.setFont('helvetica', 'bold');
       pdf.text(pdfOptions.value.title, pageWidth / 2, margin + 5, { align: 'center' });
     }
     
     // Calculate map area
-    const titleHeight = pdfOptions.value.title ? 15 : 0;
-    const legendHeight = pdfOptions.value.showLegend ? 20 : 0;
+    const titleHeight = pdfOptions.value.title ? (pdfOptions.value.pageSize === 'a3' ? 18 : 15) : 0;
+    const legendHeight = pdfOptions.value.showLegend ? (pdfOptions.value.pageSize === 'a3' ? 25 : 20) : 0;
     const mapTop = margin + titleHeight;
-    const mapHeight = pageHeight - margin * 2 - titleHeight - legendHeight;
-    const mapWidth = pageWidth - margin * 2;
+    const availableWidth = pageWidth - margin * 2;
+    const availableHeight = pageHeight - margin * 2 - titleHeight - legendHeight;
     
-    // Add map image
-    const imgData = mapCanvas.toDataURL('image/png');
-    pdf.addImage(imgData, 'PNG', margin, mapTop, mapWidth, mapHeight);
+    // Calculate proper aspect ratio to prevent deformation
+    const canvasAspect = exportCanvas.width / exportCanvas.height;
+    let mapWidth = availableWidth;
+    let mapHeight = availableWidth / canvasAspect;
+    
+    if (mapHeight > availableHeight) {
+      mapHeight = availableHeight;
+      mapWidth = availableHeight * canvasAspect;
+    }
+    
+    // Center the map horizontally
+    const mapLeft = margin + (availableWidth - mapWidth) / 2;
+    
+    // Add map image with proper aspect ratio
+    const imgData = exportCanvas.toDataURL('image/png', 1.0);
+    pdf.addImage(imgData, 'PNG', mapLeft, mapTop, mapWidth, mapHeight);
     
     // Add north pointer
     if (pdfOptions.value.showNorthPointer) {
-      const npX = pageWidth - margin - 10;
+      const npX = mapLeft + mapWidth - 10;
       const npY = mapTop + 10;
       pdf.setFillColor(255, 255, 255);
       pdf.circle(npX, npY, 5, 'F');
@@ -1241,7 +1743,7 @@ async function exportPdfMap() {
             scaleLabel = `${scaleDistance} m`;
           }
           
-          const sbX = margin + 5;
+          const sbX = mapLeft + 5;
           const sbY = mapTop + mapHeight - 5;
           const sbWidth = 30;
           
@@ -1259,25 +1761,28 @@ async function exportPdfMap() {
       }
     }
     
-    // Add legend
+    // Add legend based on export content
     if (pdfOptions.value.showLegend) {
       const legendY = pageHeight - margin - legendHeight + 5;
-      pdf.setFontSize(10);
+      pdf.setFontSize(pdfOptions.value.pageSize === 'a3' ? 12 : 10);
       pdf.setFont('helvetica', 'bold');
       pdf.text('Legend:', margin, legendY);
       
-      let legendX = margin + 20;
-      pdf.setFontSize(8);
+      let legendX = margin + 25;
+      pdf.setFontSize(pdfOptions.value.pageSize === 'a3' ? 10 : 8);
       pdf.setFont('helvetica', 'normal');
       
-      if (savedPlaces.value.length > 0) {
+      const showPlaces = (pdfOptions.value.exportContent === 'both' || pdfOptions.value.exportContent === 'places') && savedPlaces.value.length > 0;
+      const showRoutes = (pdfOptions.value.exportContent === 'both' || pdfOptions.value.exportContent === 'routes') && (savedRoutes.value.length > 0 || currentRouteCoordinates.value.length > 0);
+      
+      if (showPlaces) {
         pdf.setFillColor(239, 68, 68);
         pdf.circle(legendX, legendY - 1, 2, 'F');
         pdf.text('Places', legendX + 5, legendY);
-        legendX += 30;
+        legendX += 35;
       }
       
-      if (savedRoutes.value.length > 0 || currentRouteCoordinates.value.length > 0) {
+      if (showRoutes) {
         pdf.setDrawColor(34, 197, 94);
         pdf.setLineWidth(1);
         pdf.line(legendX, legendY - 1, legendX + 10, legendY - 1);
@@ -1289,6 +1794,14 @@ async function exportPdfMap() {
     pdf.setFontSize(8);
     pdf.setFont('helvetica', 'normal');
     pdf.text(`Generated: ${new Date().toLocaleDateString()}`, pageWidth - margin, pageHeight - margin, { align: 'right' });
+    
+    // Restore hidden features
+    originalMarkersState.forEach(({ feature }) => {
+      markersSource?.addFeature(feature);
+    });
+    originalRouteState.forEach(({ feature }) => {
+      routeSource?.addFeature(feature);
+    });
     
     pdf.save(`map-${new Date().toISOString().split('T')[0]}.pdf`);
     showStatus('PDF exported successfully!', 'success');
@@ -1412,6 +1925,39 @@ function handleMapClick(event: { coordinate: number[] }) {
   const lon = coords[0];
   const lat = coords[1];
   
+  // Handle pick point mode for directions
+  if (pickPointMode.value) {
+    reverseGeocode(lon, lat).then((name) => {
+      const place: PlaceResult = {
+        name,
+        address: `${lat.toFixed(5)}, ${lon.toFixed(5)}`,
+        lon,
+        lat,
+      };
+      
+      if (pickPointMode.value === 'origin') {
+        selectOrigin(place);
+        showStatus('Origin set from map!', 'success');
+      } else if (pickPointMode.value === 'stop') {
+        const newStop: Stop = {
+          id: generateId(),
+          name,
+          lon,
+          lat,
+        };
+        stops.value.push(newStop);
+        addDirectionMarker(lon, lat, 'stop', stops.value.length - 1);
+        showStatus('Stop added from map!', 'success');
+      } else if (pickPointMode.value === 'destination') {
+        selectDestination(place);
+        showStatus('Destination set from map!', 'success');
+      }
+      
+      pickPointMode.value = null;
+    });
+    return;
+  }
+  
   if (searchMode.value === 'places') {
     // Add place from map click
     reverseGeocode(lon, lat).then((name) => {
@@ -1426,20 +1972,6 @@ function handleMapClick(event: { coordinate: number[] }) {
       saveToLocalStorage();
       showStatus('Place added!', 'success');
     });
-  } else if (searchMode.value === 'directions' && addStopMode.value) {
-    // Add stop from map click
-    reverseGeocode(lon, lat).then((name) => {
-      const newStop: Stop = {
-        id: generateId(),
-        name,
-        lon,
-        lat,
-      };
-      stops.value.push(newStop);
-      addDirectionMarker(lon, lat, 'stop', stops.value.length - 1);
-      addStopMode.value = false;
-      showStatus('Stop added!', 'success');
-    });
   }
 }
 
@@ -1447,6 +1979,9 @@ function handleMapClick(event: { coordinate: number[] }) {
 onMounted(() => {
   loadFromLocalStorage();
   recordLastAccessed();
+  
+  // Load map preferences from API if authenticated
+  loadMapPreferencesFromAPI();
 
   if (mapContainer.value) {
     markersSource = new VectorSource();
@@ -1805,6 +2340,143 @@ onUnmounted(() => {
 
 .remove-btn:hover {
   color: var(--color-error);
+}
+
+.edit-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  cursor: pointer;
+  padding: 0 0.25rem;
+  line-height: 1;
+}
+
+.edit-btn:hover {
+  color: var(--color-primary);
+}
+
+/* Action buttons row */
+.action-buttons-row {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.action-btn {
+  flex: 1;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: var(--transition);
+  white-space: nowrap;
+}
+
+.action-btn:hover {
+  border-color: var(--color-primary);
+  background: var(--color-background);
+}
+
+.action-btn.active {
+  background: var(--color-primary);
+  color: white;
+  border-color: var(--color-primary);
+}
+
+.action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.action-btn-sm {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.action-btn-sm:hover {
+  border-color: var(--color-primary);
+  background: var(--color-background);
+}
+
+.action-btn-sm.active {
+  background: var(--color-primary);
+  color: white;
+  border-color: var(--color-primary);
+}
+
+.action-btn-sm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Stops header with action buttons */
+.stops-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.stop-action-buttons {
+  display: flex;
+  gap: 0.25rem;
+}
+
+/* Pick mode input highlight */
+.input.pick-mode {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+/* Customization header */
+.customization-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.customization-header h3 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin-bottom: 0;
+}
+
+/* Modal description */
+.modal-description {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  margin-bottom: 1rem;
+}
+
+/* Picker list for saved places selection */
+.picker-list {
+  max-height: 300px;
+  overflow-y: auto;
+  margin-bottom: 1rem;
+}
+
+.picker-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.picker-item:hover {
+  background: var(--color-background);
 }
 
 .geojson-section h3 {
