@@ -1,0 +1,28 @@
+{
+  "apps": [
+    {
+      "id": "maps",
+      "name": "Maps",
+      "description": "Interactive map with search, directions, and GeoJSON support",
+      "icon": "🗺️",
+      "path": "/maps",
+      "keywords": ["map", "navigation", "directions", "places", "routing", "geojson", "location"]
+    },
+    {
+      "id": "dashboard",
+      "name": "Dashboard",
+      "description": "Manage your preferences and account settings",
+      "icon": "⚙️",
+      "path": "/dashboard",
+      "keywords": ["settings", "preferences", "profile", "account", "theme"]
+    },
+    {
+      "id": "home",
+      "name": "Home",
+      "description": "Welcome page with date and time information",
+      "icon": "🏠",
+      "path": "/home",
+      "keywords": ["home", "welcome", "datetime", "time", "date"]
+    }
+  ]
+}
