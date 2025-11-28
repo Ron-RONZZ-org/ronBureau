@@ -5,7 +5,7 @@ export default defineNuxtConfig({
   modules: ['@pinia/nuxt'],
   runtimeConfig: {
     public: {
-      apiBase: process.env.API_BASE || 'http://localhost:3001',
+      apiBase: process.env.API_BASE || 'http://localhost:3010',
       graphhopperApiKey: process.env.GRAPHHOPPER_API_KEY || '',
     },
   },

@@ -126,7 +126,7 @@
           <!-- Saved Places -->
           <div class="saved-section">
             <div class="saved-header">
-              <h3>📌 Saved Places</h3>
+              <h3>📌 Places</h3>
               <button class="btn btn-outline btn-sm" @click="clearAllPlaces">Clear All</button>
             </div>
             <div v-if="savedPlaces.length === 0" class="no-saved">
