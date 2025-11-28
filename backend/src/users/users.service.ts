@@ -26,8 +26,8 @@ export class UsersService {
     return this.prisma.userPreferences.upsert({
       where: { userId: user.id },
       update: {
-        ...(theme && { theme }),
-        ...(datetimeFormat && { datetimeFormat }),
+        ...(theme !== undefined && { theme }),
+        ...(datetimeFormat !== undefined && { datetimeFormat }),
       },
       create: {
         userId: user.id,
