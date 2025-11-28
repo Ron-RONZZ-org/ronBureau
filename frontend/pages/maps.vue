@@ -156,6 +156,11 @@
               </label>
             </div>
           </div>
+
+          <!-- Status Message -->
+          <div v-if="statusMessage" class="status-message" :class="statusType">
+            {{ statusMessage }}
+          </div>
         </div>
 
         <div class="maps-container">
@@ -180,6 +185,8 @@ import { Point, LineString } from 'ol/geom';
 import Feature from 'ol/Feature';
 import { Style, Circle, Fill, Stroke, Text } from 'ol/style';
 import GeoJSON from 'ol/format/GeoJSON';
+
+const config = useRuntimeConfig();
 
 interface PlaceResult {
   name: string;
@@ -227,8 +234,22 @@ const destination = ref<PlaceResult | null>(null);
 const routeInfo = ref<RouteInfo | null>(null);
 const isLoadingRoute = ref(false);
 
+// Status message state
+const statusMessage = ref('');
+const statusType = ref<'success' | 'error' | ''>('');
+
 // Saved places
 const savedPlaces = ref<SavedPlace[]>([]);
+
+// Show status message helper
+function showStatus(message: string, type: 'success' | 'error') {
+  statusMessage.value = message;
+  statusType.value = type;
+  setTimeout(() => {
+    statusMessage.value = '';
+    statusType.value = '';
+  }, 3000);
+}
 
 // Debounce helper
 function debounce<T extends (...args: unknown[]) => void>(fn: T, delay: number) {
@@ -407,7 +428,12 @@ async function getDirections() {
   }
 
   try {
-    const url = `https://graphhopper.com/api/1/route?point=${origin.value.lat},${origin.value.lon}&point=${destination.value.lat},${destination.value.lon}&vehicle=car&locale=en&points_encoded=false&key=LijBPDQGfu7Iiq80w3HzwB4RUDJbMbhs6BU0dEnn`;
+    const apiKey = config.public.graphhopperApiKey;
+    if (!apiKey) {
+      console.warn('GraphHopper API key not configured. Please set GRAPHHOPPER_API_KEY environment variable.');
+      return;
+    }
+    const url = `https://graphhopper.com/api/1/route?point=${origin.value.lat},${origin.value.lon}&point=${destination.value.lat},${destination.value.lon}&vehicle=car&locale=en&points_encoded=false&key=${apiKey}`;
 
     const response = await fetch(url);
     const data = await response.json();
@@ -553,7 +579,7 @@ function exportGeoJSON() {
   }
 
   if (features.length === 0) {
-    alert('No data to export');
+    showStatus('No data to export', 'error');
     return;
   }
 
@@ -628,7 +654,7 @@ function importGeoJSON(event: Event) {
       }
     } catch (error) {
       console.error('Failed to import GeoJSON:', error);
-      alert('Failed to import GeoJSON file');
+      showStatus('Failed to import GeoJSON file', 'error');
     }
   };
   reader.readAsText(file);
@@ -924,5 +950,23 @@ onUnmounted(() => {
   .maps-container {
     min-height: 400px;
   }
+}
+
+.status-message {
+  padding: 0.75rem;
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+  text-align: center;
+  margin-top: 0.5rem;
+}
+
+.status-message.success {
+  background-color: rgba(34, 197, 94, 0.1);
+  color: var(--color-success);
+}
+
+.status-message.error {
+  background-color: rgba(239, 68, 68, 0.1);
+  color: var(--color-error);
 }
 </style>

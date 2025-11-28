@@ -6,6 +6,7 @@ export default defineNuxtConfig({
   runtimeConfig: {
     public: {
       apiBase: process.env.API_BASE || 'http://localhost:3001',
+      graphhopperApiKey: process.env.GRAPHHOPPER_API_KEY || '',
     },
   },
   app: {
