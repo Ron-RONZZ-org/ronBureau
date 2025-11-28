@@ -94,16 +94,31 @@
             <!-- Intermediary Stops -->
             <div v-if="stops.length > 0" class="stops-section">
               <label>Stops</label>
-              <draggable v-model="stops" item-key="id" handle=".drag-handle" @end="onStopReorder">
-                <template #item="{ element, index }">
-                  <div class="stop-item">
-                    <span class="drag-handle">⋮⋮</span>
-                    <span class="stop-number">{{ index + 1 }}</span>
-                    <span class="stop-name">{{ element.name }}</span>
-                    <button class="remove-btn" @click="removeStop(index)">×</button>
+              <div class="stops-list">
+                <div 
+                  v-for="(stop, index) in stops" 
+                  :key="stop.id"
+                  class="stop-item"
+                >
+                  <div class="stop-reorder-controls">
+                    <button 
+                      class="reorder-btn" 
+                      @click="moveStopUp(index)" 
+                      :disabled="index === 0"
+                      title="Move up"
+                    >▲</button>
+                    <button 
+                      class="reorder-btn" 
+                      @click="moveStopDown(index)" 
+                      :disabled="index === stops.length - 1"
+                      title="Move down"
+                    >▼</button>
                   </div>
-                </template>
-              </draggable>
+                  <span class="stop-number">{{ index + 1 }}</span>
+                  <span class="stop-name">{{ stop.name }}</span>
+                  <button class="remove-btn" @click="removeStop(index)">×</button>
+                </div>
+              </div>
             </div>
             <button class="btn btn-outline btn-sm w-full" @click="addStopMode = !addStopMode">
               {{ addStopMode ? '✓ Click map to add stop' : '+ Add Stop' }}
@@ -341,13 +356,6 @@ interface Stop {
   lon: number;
   lat: number;
 }
-
-// Simple draggable component
-const draggable = {
-  template: `<div><slot v-for="(item, index) in modelValue" :key="item.id" :element="item" :index="index" /></div>`,
-  props: ['modelValue', 'itemKey', 'handle'],
-  emits: ['update:modelValue', 'end'],
-};
 
 const auth = useAuthStore();
 
@@ -736,6 +744,24 @@ function removeStop(index: number) {
   refreshStopMarkers();
 }
 
+function moveStopUp(index: number) {
+  if (index > 0) {
+    const temp = stops.value[index];
+    stops.value[index] = stops.value[index - 1];
+    stops.value[index - 1] = temp;
+    refreshStopMarkers();
+  }
+}
+
+function moveStopDown(index: number) {
+  if (index < stops.value.length - 1) {
+    const temp = stops.value[index];
+    stops.value[index] = stops.value[index + 1];
+    stops.value[index + 1] = temp;
+    refreshStopMarkers();
+  }
+}
+
 function refreshStopMarkers() {
   if (!markersSource) return;
   
@@ -753,10 +779,6 @@ function refreshStopMarkers() {
   });
 }
 
-function onStopReorder() {
-  refreshStopMarkers();
-}
-
 // Get directions using GraphHopper
 async function getDirections() {
   if (!origin.value || !destination.value) return;
@@ -772,7 +794,7 @@ async function getDirections() {
   try {
     const apiKey = config.public.graphhopperApiKey;
     if (!apiKey) {
-      showStatus('GraphHopper API key not configured', 'error');
+      showStatus('Route service unavailable', 'error');
       return;
     }
     
@@ -1204,10 +1226,9 @@ async function exportPdfMap() {
       if (resolution) {
         const center = view.getCenter();
         if (center) {
-          const pointOnMap = toLonLat(center);
-          const point1 = toLonLat([center[0], center[1]]);
-          const point2 = toLonLat([center[0] + resolution * 100, center[1]]);
-          const distance = getDistance(point1, point2);
+          const centerLonLat = toLonLat(center);
+          const offsetPoint = toLonLat([center[0] + resolution * 100, center[1]]);
+          const distance = getDistance(centerLonLat, offsetPoint);
           
           let scaleDistance: number;
           let scaleLabel: string;
@@ -1583,10 +1604,43 @@ onUnmounted(() => {
   font-size: 0.875rem;
 }
 
-.drag-handle {
-  cursor: grab;
+.stop-reorder-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.reorder-btn {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  padding: 0;
+  width: 18px;
+  height: 14px;
+  font-size: 8px;
+  line-height: 1;
+  cursor: pointer;
   color: var(--color-text-muted);
-  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.reorder-btn:hover:not(:disabled) {
+  background: var(--color-primary);
+  color: white;
+  border-color: var(--color-primary);
+}
+
+.reorder-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.stops-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .stop-number {
