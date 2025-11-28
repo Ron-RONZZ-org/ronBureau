@@ -173,7 +173,6 @@
 
 <script setup lang="ts">
 import { useAuthStore } from '~/stores/auth';
-import 'ol/ol.css';
 import Map from 'ol/Map';
 import View from 'ol/View';
 import TileLayer from 'ol/layer/Tile';
