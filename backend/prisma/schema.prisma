@@ -1,0 +1,45 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserType {
+  USER
+  ADMINISTRATOR
+  ORGANIZATION_OWNER
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+}
+
+model User {
+  id                 String     @id @default(uuid())
+  organizationId     String
+  displayName        String
+  userId             String     @unique
+  userType           UserType   @default(USER)
+  password           String
+  accountValidFrom   DateTime   @default(now())
+  accountValidUntil  DateTime?
+  status             UserStatus @default(ACTIVE)
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  preferences        UserPreferences?
+}
+
+model UserPreferences {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  theme          String   @default("light")
+  datetimeFormat String   @default("ISO")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
