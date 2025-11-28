@@ -1609,8 +1609,12 @@ async function exportPdfMap() {
   showStatus('Generating PDF...', 'success');
   
   try {
-    // Temporarily hide current location marker for PDF export
+    // Save current location marker features before clearing
+    const savedLocationFeatures: Feature[] = [];
     if (currentLocationSource) {
+      currentLocationSource.getFeatures().forEach(f => {
+        savedLocationFeatures.push(f);
+      });
       currentLocationSource.clear();
     }
     
@@ -1618,22 +1622,30 @@ async function exportPdfMap() {
     await new Promise(resolve => setTimeout(resolve, 100));
     
     // Temporarily filter markers based on export content setting
-    const originalMarkersState: { feature: Feature; visible: boolean }[] = [];
-    const originalRouteState: { feature: Feature; visible: boolean }[] = [];
+    const originalMarkersState: Feature[] = [];
+    const originalRouteState: Feature[] = [];
     
     if (markersSource && pdfOptions.value.exportContent !== 'both') {
+      const featuresToRemove: Feature[] = [];
       markersSource.getFeatures().forEach((f) => {
         const featureType = f.get('type');
         if (pdfOptions.value.exportContent === 'routes' && featureType === 'place') {
-          originalMarkersState.push({ feature: f, visible: true });
-          markersSource?.removeFeature(f);
+          featuresToRemove.push(f);
         }
+      });
+      featuresToRemove.forEach(f => {
+        originalMarkersState.push(f);
+        markersSource?.removeFeature(f);
       });
     }
     
     if (routeSource && pdfOptions.value.exportContent === 'places') {
+      const featuresToRemove: Feature[] = [];
       routeSource.getFeatures().forEach((f) => {
-        originalRouteState.push({ feature: f, visible: true });
+        featuresToRemove.push(f);
+      });
+      featuresToRemove.forEach(f => {
+        originalRouteState.push(f);
         routeSource?.removeFeature(f);
       });
     }
@@ -1643,6 +1655,10 @@ async function exportPdfMap() {
     
     const mapCanvas = map.getViewport().querySelector('canvas');
     if (!mapCanvas) {
+      // Restore features before showing error
+      originalMarkersState.forEach(f => markersSource?.addFeature(f));
+      originalRouteState.forEach(f => routeSource?.addFeature(f));
+      savedLocationFeatures.forEach(f => currentLocationSource?.addFeature(f));
       showStatus('Could not capture map', 'error');
       return;
     }
@@ -1654,6 +1670,10 @@ async function exportPdfMap() {
     exportCanvas.height = mapCanvas.height * scale;
     const ctx = exportCanvas.getContext('2d');
     if (!ctx) {
+      // Restore features before showing error
+      originalMarkersState.forEach(f => markersSource?.addFeature(f));
+      originalRouteState.forEach(f => routeSource?.addFeature(f));
+      savedLocationFeatures.forEach(f => currentLocationSource?.addFeature(f));
       showStatus('Could not create export canvas', 'error');
       return;
     }
@@ -1796,11 +1816,16 @@ async function exportPdfMap() {
     pdf.text(`Generated: ${new Date().toLocaleDateString()}`, pageWidth - margin, pageHeight - margin, { align: 'right' });
     
     // Restore hidden features
-    originalMarkersState.forEach(({ feature }) => {
-      markersSource?.addFeature(feature);
+    originalMarkersState.forEach((f) => {
+      markersSource?.addFeature(f);
     });
-    originalRouteState.forEach(({ feature }) => {
-      routeSource?.addFeature(feature);
+    originalRouteState.forEach((f) => {
+      routeSource?.addFeature(f);
+    });
+    
+    // Restore current location features
+    savedLocationFeatures.forEach((f) => {
+      currentLocationSource?.addFeature(f);
     });
     
     pdf.save(`map-${new Date().toISOString().split('T')[0]}.pdf`);

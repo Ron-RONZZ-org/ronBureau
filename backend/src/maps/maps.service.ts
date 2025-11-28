@@ -166,9 +166,9 @@ export class MapsService {
   }
 
   // Map Preferences
-  async getMapPreferences(userId: string) {
+  async getMapPreferences(userUuid: string) {
     const user = await this.prisma.user.findUnique({
-      where: { userId },
+      where: { id: userUuid },
       include: { preferences: true },
     });
     if (!user?.preferences?.mapPreferences) {
@@ -187,8 +187,8 @@ export class MapsService {
     }
   }
 
-  async updateMapPreferences(userId: string, preferences: { placeMarkerColor?: string; routeColor?: string }) {
-    const user = await this.prisma.user.findUnique({ where: { userId } });
+  async updateMapPreferences(userUuid: string, preferences: { placeMarkerColor?: string; routeColor?: string }) {
+    const user = await this.prisma.user.findUnique({ where: { id: userUuid } });
     if (!user) {
       throw new NotFoundException('User not found');
     }
