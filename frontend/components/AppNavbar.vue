@@ -10,6 +10,9 @@
         <NuxtLink to="/home" class="nav-link" :class="{ active: route.path === '/home' }">
           Home
         </NuxtLink>
+        <NuxtLink to="/apps" class="nav-link" :class="{ active: route.path === '/apps' }">
+          Apps
+        </NuxtLink>
         <NuxtLink to="/dashboard" class="nav-link" :class="{ active: route.path === '/dashboard' }">
           Dashboard
         </NuxtLink>
