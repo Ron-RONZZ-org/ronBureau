@@ -130,7 +130,7 @@ export class MapsController {
   // Map Preferences endpoints
   @Get('preferences')
   async getMapPreferences(@Request() req) {
-    return this.mapsService.getMapPreferences(req.user.userId);
+    return this.mapsService.getMapPreferences(req.user.id);
   }
 
   @Put('preferences')
@@ -138,6 +138,6 @@ export class MapsController {
     @Request() req,
     @Body() body: { placeMarkerColor?: string; routeColor?: string },
   ) {
-    return this.mapsService.updateMapPreferences(req.user.userId, body);
+    return this.mapsService.updateMapPreferences(req.user.id, body);
   }
 }
