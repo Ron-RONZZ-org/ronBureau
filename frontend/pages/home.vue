@@ -5,9 +5,7 @@
         <div class="home-page">
           <div class="welcome-section card">
             <h1 class="welcome-title">Welcome, {{ auth.user?.displayName }}!</h1>
-            <p class="welcome-subtitle">You are logged in as a {{ userTypeName }}</p>
           </div>
-
           <div class="datetime-section card">
             <h2 class="section-title">📅 Current Date & Time</h2>
             <div class="datetime-display">
@@ -22,31 +20,6 @@
             </div>
           </div>
 
-          <div class="info-grid">
-            <div class="info-card card">
-              <div class="info-icon">🏢</div>
-              <div class="info-content">
-                <h3>Organization</h3>
-                <p>{{ auth.user?.organizationId }}</p>
-              </div>
-            </div>
-
-            <div class="info-card card">
-              <div class="info-icon">👤</div>
-              <div class="info-content">
-                <h3>User ID</h3>
-                <p>{{ auth.user?.userId }}</p>
-              </div>
-            </div>
-
-            <div class="info-card card">
-              <div class="info-icon">🎨</div>
-              <div class="info-content">
-                <h3>Theme</h3>
-                <p>{{ auth.userPreferences.theme === 'dark' ? 'Dark Mode' : 'Light Mode' }}</p>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </NuxtLayout>

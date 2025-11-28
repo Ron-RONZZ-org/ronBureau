@@ -46,7 +46,7 @@
 
         <div class="login-footer">
           <p class="text-muted text-center">
-            Test credentials: <code>admin</code> / <code>password123</code>
+            Test
           </p>
         </div>
       </div>
