@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   Request,
   UseGuards,
 } from '@nestjs/common';
@@ -16,6 +17,72 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 @UseGuards(JwtAuthGuard)
 export class MapsController {
   constructor(private mapsService: MapsService) {}
+
+  // Place Lists endpoints
+  @Post('place-lists')
+  async createPlaceList(
+    @Request() req,
+    @Body() body: { name: string; description?: string },
+  ) {
+    return this.mapsService.createPlaceList(req.user.id, body);
+  }
+
+  @Get('place-lists')
+  async getPlaceLists(@Request() req) {
+    return this.mapsService.getPlaceLists(req.user.id);
+  }
+
+  @Get('place-lists/:id')
+  async getPlaceList(@Request() req, @Param('id') id: string) {
+    return this.mapsService.getPlaceList(req.user.id, id);
+  }
+
+  @Put('place-lists/:id')
+  async updatePlaceList(
+    @Request() req,
+    @Param('id') id: string,
+    @Body() body: { name?: string; description?: string },
+  ) {
+    return this.mapsService.updatePlaceList(req.user.id, id, body);
+  }
+
+  @Delete('place-lists/:id')
+  async deletePlaceList(@Request() req, @Param('id') id: string) {
+    return this.mapsService.deletePlaceList(req.user.id, id);
+  }
+
+  // Route Lists endpoints
+  @Post('route-lists')
+  async createRouteList(
+    @Request() req,
+    @Body() body: { name: string; description?: string },
+  ) {
+    return this.mapsService.createRouteList(req.user.id, body);
+  }
+
+  @Get('route-lists')
+  async getRouteLists(@Request() req) {
+    return this.mapsService.getRouteLists(req.user.id);
+  }
+
+  @Get('route-lists/:id')
+  async getRouteList(@Request() req, @Param('id') id: string) {
+    return this.mapsService.getRouteList(req.user.id, id);
+  }
+
+  @Put('route-lists/:id')
+  async updateRouteList(
+    @Request() req,
+    @Param('id') id: string,
+    @Body() body: { name?: string; description?: string },
+  ) {
+    return this.mapsService.updateRouteList(req.user.id, id, body);
+  }
+
+  @Delete('route-lists/:id')
+  async deleteRouteList(@Request() req, @Param('id') id: string) {
+    return this.mapsService.deleteRouteList(req.user.id, id);
+  }
 
   // Saved Places endpoints
   @Post('places')
@@ -29,14 +96,15 @@ export class MapsController {
       icon?: string;
       color?: string;
       geojson?: string;
+      listId?: string;
     },
   ) {
     return this.mapsService.createPlace(req.user.id, body);
   }
 
   @Get('places')
-  async getPlaces(@Request() req) {
-    return this.mapsService.getPlaces(req.user.id);
+  async getPlaces(@Request() req, @Query('listId') listId?: string) {
+    return this.mapsService.getPlaces(req.user.id, listId);
   }
 
   @Put('places/:id')
@@ -51,6 +119,7 @@ export class MapsController {
       icon?: string;
       color?: string;
       geojson?: string;
+      listId?: string | null;
     },
   ) {
     return this.mapsService.updatePlace(req.user.id, id, body);
@@ -84,14 +153,15 @@ export class MapsController {
       duration: string;
       coordinates: string;
       geojson?: string;
+      listId?: string;
     },
   ) {
     return this.mapsService.createRoute(req.user.id, body);
   }
 
   @Get('routes')
-  async getRoutes(@Request() req) {
-    return this.mapsService.getRoutes(req.user.id);
+  async getRoutes(@Request() req, @Query('listId') listId?: string) {
+    return this.mapsService.getRoutes(req.user.id, listId);
   }
 
   @Put('routes/:id')
@@ -112,6 +182,7 @@ export class MapsController {
       duration?: string;
       coordinates?: string;
       geojson?: string;
+      listId?: string | null;
     },
   ) {
     return this.mapsService.updateRoute(req.user.id, id, body);

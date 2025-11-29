@@ -48,6 +48,7 @@ model UserPreferences {
 model SavedPlace {
   id          String   @id @default(uuid())
   userId      String
+  listId      String?  // Optional: belongs to a MapPlaceList
   name        String
   lon         Float
   lat         Float
@@ -56,13 +57,16 @@ model SavedPlace {
   geojson     String?  // Full GeoJSON content if needed
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  list        MapPlaceList? @relation(fields: [listId], references: [id], onDelete: SetNull)
 
   @@index([userId])
+  @@index([listId])
 }
 
 model SavedRoute {
   id          String   @id @default(uuid())
   userId      String
+  listId      String?  // Optional: belongs to a MapRouteList
   name        String
   originName  String
   originLon   Float
@@ -77,6 +81,34 @@ model SavedRoute {
   geojson     String?  // Full GeoJSON content if needed
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  list        MapRouteList? @relation(fields: [listId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([listId])
+}
+
+// Named lists for organizing places
+model MapPlaceList {
+  id          String       @id @default(uuid())
+  userId      String
+  name        String       // e.g., "Delivery Mondays", "worktrip 12-12-2025"
+  description String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  places      SavedPlace[]
+
+  @@index([userId])
+}
+
+// Named lists for organizing routes
+model MapRouteList {
+  id          String       @id @default(uuid())
+  userId      String
+  name        String       // e.g., "Delivery Mondays", "worktrip 12-12-2025"
+  description String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  routes      SavedRoute[]
 
   @@index([userId])
 }
