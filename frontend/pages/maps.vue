@@ -107,7 +107,7 @@
                 >×</button>
               </div>
               <!-- Unified action buttons - shown on focus -->
-              <div v-if="focusedField === 'origin'" class="field-action-buttons">
+              <div v-if="focusedField === 'origin'" class="field-action-buttons" @mouseenter="isMouseOverActionButtons = true" @mouseleave="isMouseOverActionButtons = false">
                 <button class="action-btn-sm" @click.prevent="useCurrentLocationFor('origin')" :disabled="isGettingLocation" title="Use my location">
                   📍 My Location
                 </button>
@@ -160,7 +160,7 @@
                   >×</button>
                 </div>
                 <!-- Unified action buttons - shown on focus -->
-                <div v-if="focusedField === 'stop'" class="field-action-buttons">
+                <div v-if="focusedField === 'stop'" class="field-action-buttons" @mouseenter="isMouseOverActionButtons = true" @mouseleave="isMouseOverActionButtons = false">
                   <button class="action-btn-sm" @click.prevent="useCurrentLocationFor('stop')" :disabled="isGettingLocation" title="Use my location">
                     📍 My Location
                   </button>
@@ -235,7 +235,7 @@
                 >×</button>
               </div>
               <!-- Unified action buttons - shown on focus -->
-              <div v-if="focusedField === 'destination'" class="field-action-buttons">
+              <div v-if="focusedField === 'destination'" class="field-action-buttons" @mouseenter="isMouseOverActionButtons = true" @mouseleave="isMouseOverActionButtons = false">
                 <button class="action-btn-sm" @click.prevent="useCurrentLocationFor('destination')" :disabled="isGettingLocation" title="Use my location">
                   📍 My Location
                 </button>
@@ -540,27 +540,23 @@
         <div v-if="showPlaceListsModal" class="modal-overlay" @click.self="showPlaceListsModal = false">
           <div class="modal-content modal-large">
             <h3>📋 Manage Place Lists</h3>
-            <p class="modal-description">Create named lists to organize your places (e.g., "Delivery Mondays", "worktrip 12-12-2025")</p>
+            <p class="modal-description">Organize your places into named lists (e.g., "Delivery Mondays", "worktrip 12-12-2025")</p>
             
-            <div class="list-create-form">
+            <div class="list-search-form">
               <input 
-                v-model="newPlaceListName" 
+                v-model="placeListSearchQuery" 
                 type="text" 
                 class="input" 
-                placeholder="New list name..."
-                @keyup.enter="createPlaceList"
+                placeholder="Search lists..."
               />
-              <button class="btn btn-primary" @click="createPlaceList" :disabled="!newPlaceListName.trim()">
-                + Create
-              </button>
             </div>
             
-            <div v-if="placeLists.length === 0" class="no-saved">
-              <p>No place lists yet. Create one above!</p>
+            <div v-if="filteredPlaceLists.length === 0" class="no-saved">
+              <p>{{ placeLists.length === 0 ? 'No place lists yet.' : 'No matching lists found.' }}</p>
             </div>
             <div v-else class="lists-container">
               <div 
-                v-for="list in placeLists" 
+                v-for="list in filteredPlaceLists" 
                 :key="list.id" 
                 class="list-item"
               >
@@ -593,27 +589,23 @@
         <div v-if="showRouteListsModal" class="modal-overlay" @click.self="showRouteListsModal = false">
           <div class="modal-content modal-large">
             <h3>📋 Manage Route Lists</h3>
-            <p class="modal-description">Create named lists to organize your routes (e.g., "Delivery Mondays", "worktrip 12-12-2025")</p>
+            <p class="modal-description">Organize your routes into named lists (e.g., "Delivery Mondays", "worktrip 12-12-2025")</p>
             
-            <div class="list-create-form">
+            <div class="list-search-form">
               <input 
-                v-model="newRouteListName" 
+                v-model="routeListSearchQuery" 
                 type="text" 
                 class="input" 
-                placeholder="New list name..."
-                @keyup.enter="createRouteList"
+                placeholder="Search lists..."
               />
-              <button class="btn btn-primary" @click="createRouteList" :disabled="!newRouteListName.trim()">
-                + Create
-              </button>
             </div>
             
-            <div v-if="routeLists.length === 0" class="no-saved">
-              <p>No route lists yet. Create one above!</p>
+            <div v-if="filteredRouteLists.length === 0" class="no-saved">
+              <p>{{ routeLists.length === 0 ? 'No route lists yet.' : 'No matching lists found.' }}</p>
             </div>
             <div v-else class="lists-container">
               <div 
-                v-for="list in routeLists" 
+                v-for="list in filteredRouteLists" 
                 :key="list.id" 
                 class="list-item"
               >
@@ -819,6 +811,23 @@ const showRouteListsModal = ref(false);
 const routeLists = ref<{ id: string; name: string; description?: string; routes?: SavedRoute[] }[]>([]);
 const newRouteListName = ref('');
 
+// Search queries for list modals
+const placeListSearchQuery = ref('');
+const routeListSearchQuery = ref('');
+
+// Computed filtered lists based on search
+const filteredPlaceLists = computed(() => {
+  if (!placeListSearchQuery.value.trim()) return placeLists.value;
+  const query = placeListSearchQuery.value.toLowerCase();
+  return placeLists.value.filter(list => list.name.toLowerCase().includes(query));
+});
+
+const filteredRouteLists = computed(() => {
+  if (!routeListSearchQuery.value.trim()) return routeLists.value;
+  const query = routeListSearchQuery.value.toLowerCase();
+  return routeLists.value.filter(list => list.name.toLowerCase().includes(query));
+});
+
 // Show status message helper
 function showStatus(message: string, type: 'success' | 'error') {
   statusMessage.value = message;
@@ -830,11 +839,17 @@ function showStatus(message: string, type: 'success' | 'error') {
 }
 
 // Handle field blur with delay to allow button clicks
-const FIELD_BLUR_DELAY = 200; // ms delay before hiding field action buttons
+const FIELD_BLUR_DELAY = 300; // ms delay before hiding field action buttons
+
+// Track if mouse is over action buttons
+const isMouseOverActionButtons = ref(false);
 
 function handleFieldBlur() {
   setTimeout(() => {
-    focusedField.value = null;
+    // Only hide if mouse is not over action buttons
+    if (!isMouseOverActionButtons.value) {
+      focusedField.value = null;
+    }
   }, FIELD_BLUR_DELAY);
 }
 
@@ -1961,8 +1976,33 @@ async function exportPdfMap() {
           combinedExtent[2] = Math.max(combinedExtent[2], extents[i][2]);
           combinedExtent[3] = Math.max(combinedExtent[3], extents[i][3]);
         }
-        map.getView().fit(combinedExtent, { padding: [50, 50, 50, 50] });
+        
+        // For single points, add padding to create a reasonable extent
+        const extentWidth = combinedExtent[2] - combinedExtent[0];
+        const extentHeight = combinedExtent[3] - combinedExtent[1];
+        
+        // If extent is too small (single point or very close points), expand it
+        if (extentWidth < 1000 || extentHeight < 1000) {
+          const minSize = 5000; // Minimum extent size in meters (roughly)
+          const expandX = Math.max(0, (minSize - extentWidth) / 2);
+          const expandY = Math.max(0, (minSize - extentHeight) / 2);
+          combinedExtent[0] -= expandX;
+          combinedExtent[1] -= expandY;
+          combinedExtent[2] += expandX;
+          combinedExtent[3] += expandY;
+        }
+        
+        map.getView().fit(combinedExtent, { padding: [80, 80, 80, 80], maxZoom: 18 });
+        
+        // Wait for map to render and tiles to load
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Force a map render
+        map.renderSync();
         await new Promise(resolve => setTimeout(resolve, 300));
+      } else {
+        // No features to show - keep current view but warn user
+        showStatus('Warning: No places or routes to export', 'error');
       }
     }
     
@@ -2110,29 +2150,43 @@ async function exportPdfMap() {
     if (pdfOptions.value.showScaleBar) {
       const view = map.getView();
       const resolution = view.getResolution();
-      if (resolution) {
+      if (resolution && resolution > 0) {
         const center = view.getCenter();
         if (center) {
           const centerLonLat = toLonLat(center);
-          const offsetPoint = toLonLat([center[0] + resolution * 100, center[1]]);
-          const distance = getDistance(centerLonLat, offsetPoint);
+          // Calculate distance per pixel at map center
+          const pixelDistance = 100; // pixels
+          const offsetPoint = toLonLat([center[0] + resolution * pixelDistance, center[1]]);
+          const distanceFor100px = getDistance(centerLonLat, offsetPoint);
           
-          let scaleDistance: number;
-          let scaleLabel: string;
+          // Choose a nice round number for the scale bar
+          const niceScaleValues = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000];
+          let selectedScale = niceScaleValues[0];
+          let scaleBarPixels = 100;
           
-          if (distance > 1000) {
-            // Round to nearest 10 for km values
-            scaleDistance = roundToNearest10(distance / 1000);
-            scaleLabel = `${scaleDistance} km`;
-          } else {
-            // Round to nearest 10 for meter values
-            scaleDistance = roundToNearest10(distance);
-            scaleLabel = `${scaleDistance} m`;
+          // Find the best scale value that fits approximately 100 pixels (30mm on PDF)
+          for (const niceValue of niceScaleValues) {
+            const pixelsNeeded = (niceValue / distanceFor100px) * pixelDistance;
+            if (pixelsNeeded >= 50 && pixelsNeeded <= 200) {
+              selectedScale = niceValue;
+              scaleBarPixels = pixelsNeeded;
+              break;
+            }
           }
           
+          // Format the scale label
+          let scaleLabel: string;
+          if (selectedScale >= 1000) {
+            scaleLabel = `${selectedScale / 1000} km`;
+          } else {
+            scaleLabel = `${selectedScale} m`;
+          }
+          
+          // Convert pixel width to PDF mm width (approximately)
+          const pdfScaleBarWidth = (scaleBarPixels / mapCanvas.width) * mapWidth;
           const sbX = mapLeft + 5;
           const sbY = mapTop + mapHeight - 5;
-          const sbWidth = 30;
+          const sbWidth = Math.max(15, Math.min(60, pdfScaleBarWidth));
           
           pdf.setFillColor(255, 255, 255);
           pdf.rect(sbX - 2, sbY - 5, sbWidth + 4, 8, 'F');
@@ -2649,9 +2703,10 @@ function loadRouteList(list: { id: string; name: string; routes?: SavedRoute[] }
     routeSource.clear();
   }
   
-  // Load routes from list - just add them to saved routes, don't draw all
+  // Load routes from list and draw them on the map
   list.routes.forEach((route) => {
-    savedRoutes.value.push({
+    const coordinates = JSON.parse(route.coordinates);
+    const newRoute: SavedRoute = {
       id: route.id,
       name: route.name,
       origin: { name: route.originName, address: '', lon: route.originLon, lat: route.originLat },
@@ -2659,9 +2714,34 @@ function loadRouteList(list: { id: string; name: string; routes?: SavedRoute[] }
       stops: route.stops ? JSON.parse(route.stops) : [],
       distance: route.distance,
       duration: route.duration,
-      coordinates: JSON.parse(route.coordinates),
-    });
+      coordinates: coordinates,
+    };
+    savedRoutes.value.push(newRoute);
+    
+    // Draw route on map
+    if (coordinates.length > 0 && routeSource) {
+      const projectedCoords = coordinates.map((coord: number[]) => fromLonLat(coord));
+      const routeFeature = new Feature({
+        geometry: new LineString(projectedCoords),
+        type: 'route',
+      });
+      routeFeature.setStyle(
+        new Style({
+          stroke: new Stroke({
+            color: customization.value.routeColor,
+            width: 4,
+          }),
+        })
+      );
+      routeSource.addFeature(routeFeature);
+    }
   });
+  
+  // Fit map to show all routes
+  if (map && routeSource && routeSource.getFeatures().length > 0) {
+    const extent = routeSource.getExtent();
+    map.getView().fit(extent, { padding: [50, 50, 50, 50], duration: 500 });
+  }
   
   saveToLocalStorage();
   showRouteListsModal.value = false;
@@ -3497,6 +3577,14 @@ onUnmounted(() => {
 }
 
 /* List management styles */
+.list-search-form {
+  margin-bottom: 1rem;
+}
+
+.list-search-form .input {
+  width: 100%;
+}
+
 .list-create-form {
   display: flex;
   gap: 0.5rem;
