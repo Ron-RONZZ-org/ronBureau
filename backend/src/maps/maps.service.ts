@@ -8,6 +8,7 @@ interface CreatePlaceDto {
   icon?: string;
   color?: string;
   geojson?: string;
+  listId?: string;
 }
 
 interface UpdatePlaceDto {
@@ -17,6 +18,7 @@ interface UpdatePlaceDto {
   icon?: string;
   color?: string;
   geojson?: string;
+  listId?: string | null;
 }
 
 interface CreateRouteDto {
@@ -32,6 +34,7 @@ interface CreateRouteDto {
   duration: string;
   coordinates: string;
   geojson?: string;
+  listId?: string;
 }
 
 interface UpdateRouteDto {
@@ -47,11 +50,132 @@ interface UpdateRouteDto {
   duration?: string;
   coordinates?: string;
   geojson?: string;
+  listId?: string | null;
+}
+
+interface CreateListDto {
+  name: string;
+  description?: string;
+}
+
+interface UpdateListDto {
+  name?: string;
+  description?: string;
 }
 
 @Injectable()
 export class MapsService {
   constructor(private prisma: PrismaService) {}
+
+  // Place Lists
+  async createPlaceList(userId: string, data: CreateListDto) {
+    return this.prisma.mapPlaceList.create({
+      data: {
+        userId,
+        name: data.name,
+        description: data.description,
+      },
+    });
+  }
+
+  async getPlaceLists(userId: string) {
+    return this.prisma.mapPlaceList.findMany({
+      where: { userId },
+      include: { places: true },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getPlaceList(userId: string, listId: string) {
+    const list = await this.prisma.mapPlaceList.findFirst({
+      where: { id: listId, userId },
+      include: { places: true },
+    });
+    if (!list) {
+      throw new NotFoundException('Place list not found');
+    }
+    return list;
+  }
+
+  async updatePlaceList(userId: string, listId: string, data: UpdateListDto) {
+    const list = await this.prisma.mapPlaceList.findFirst({
+      where: { id: listId, userId },
+    });
+    if (!list) {
+      throw new NotFoundException('Place list not found');
+    }
+    return this.prisma.mapPlaceList.update({
+      where: { id: listId },
+      data,
+    });
+  }
+
+  async deletePlaceList(userId: string, listId: string) {
+    const list = await this.prisma.mapPlaceList.findFirst({
+      where: { id: listId, userId },
+    });
+    if (!list) {
+      throw new NotFoundException('Place list not found');
+    }
+    return this.prisma.mapPlaceList.delete({
+      where: { id: listId },
+    });
+  }
+
+  // Route Lists
+  async createRouteList(userId: string, data: CreateListDto) {
+    return this.prisma.mapRouteList.create({
+      data: {
+        userId,
+        name: data.name,
+        description: data.description,
+      },
+    });
+  }
+
+  async getRouteLists(userId: string) {
+    return this.prisma.mapRouteList.findMany({
+      where: { userId },
+      include: { routes: true },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getRouteList(userId: string, listId: string) {
+    const list = await this.prisma.mapRouteList.findFirst({
+      where: { id: listId, userId },
+      include: { routes: true },
+    });
+    if (!list) {
+      throw new NotFoundException('Route list not found');
+    }
+    return list;
+  }
+
+  async updateRouteList(userId: string, listId: string, data: UpdateListDto) {
+    const list = await this.prisma.mapRouteList.findFirst({
+      where: { id: listId, userId },
+    });
+    if (!list) {
+      throw new NotFoundException('Route list not found');
+    }
+    return this.prisma.mapRouteList.update({
+      where: { id: listId },
+      data,
+    });
+  }
+
+  async deleteRouteList(userId: string, listId: string) {
+    const list = await this.prisma.mapRouteList.findFirst({
+      where: { id: listId, userId },
+    });
+    if (!list) {
+      throw new NotFoundException('Route list not found');
+    }
+    return this.prisma.mapRouteList.delete({
+      where: { id: listId },
+    });
+  }
 
   // Saved Places
   async createPlace(userId: string, data: CreatePlaceDto) {
@@ -64,13 +188,18 @@ export class MapsService {
         icon: data.icon || '📍',
         color: data.color || '#ef4444',
         geojson: data.geojson,
+        listId: data.listId,
       },
     });
   }
 
-  async getPlaces(userId: string) {
+  async getPlaces(userId: string, listId?: string) {
+    const where: { userId: string; listId?: string | null } = { userId };
+    if (listId) {
+      where.listId = listId;
+    }
     return this.prisma.savedPlace.findMany({
-      where: { userId },
+      where,
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -123,13 +252,18 @@ export class MapsService {
         duration: data.duration,
         coordinates: data.coordinates,
         geojson: data.geojson,
+        listId: data.listId,
       },
     });
   }
 
-  async getRoutes(userId: string) {
+  async getRoutes(userId: string, listId?: string) {
+    const where: { userId: string; listId?: string | null } = { userId };
+    if (listId) {
+      where.listId = listId;
+    }
     return this.prisma.savedRoute.findMany({
-      where: { userId },
+      where,
       orderBy: { createdAt: 'desc' },
     });
   }
