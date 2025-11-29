@@ -107,7 +107,7 @@
                 >×</button>
               </div>
               <!-- Unified action buttons - shown on focus -->
-              <div v-if="focusedField === 'origin'" class="field-action-buttons" @mouseenter="isMouseOverActionButtons = true" @mouseleave="isMouseOverActionButtons = false">
+              <div v-if="focusedField === 'origin'" class="field-action-buttons" @mouseenter="isMouseOverActionButtons = true" @mouseleave="isMouseOverActionButtons = false" @mousedown.prevent>
                 <button class="action-btn-sm" @click.prevent="useCurrentLocationFor('origin')" :disabled="isGettingLocation" title="Use my location">
                   📍 My Location
                 </button>
@@ -160,7 +160,7 @@
                   >×</button>
                 </div>
                 <!-- Unified action buttons - shown on focus -->
-                <div v-if="focusedField === 'stop'" class="field-action-buttons" @mouseenter="isMouseOverActionButtons = true" @mouseleave="isMouseOverActionButtons = false">
+                <div v-if="focusedField === 'stop'" class="field-action-buttons" @mouseenter="isMouseOverActionButtons = true" @mouseleave="isMouseOverActionButtons = false" @mousedown.prevent>
                   <button class="action-btn-sm" @click.prevent="useCurrentLocationFor('stop')" :disabled="isGettingLocation" title="Use my location">
                     📍 My Location
                   </button>
@@ -235,7 +235,7 @@
                 >×</button>
               </div>
               <!-- Unified action buttons - shown on focus -->
-              <div v-if="focusedField === 'destination'" class="field-action-buttons" @mouseenter="isMouseOverActionButtons = true" @mouseleave="isMouseOverActionButtons = false">
+              <div v-if="focusedField === 'destination'" class="field-action-buttons" @mouseenter="isMouseOverActionButtons = true" @mouseleave="isMouseOverActionButtons = false" @mousedown.prevent>
                 <button class="action-btn-sm" @click.prevent="useCurrentLocationFor('destination')" :disabled="isGettingLocation" title="Use my location">
                   📍 My Location
                 </button>
@@ -840,7 +840,7 @@ function showStatus(message: string, type: 'success' | 'error') {
 }
 
 // Handle field blur with delay to allow button clicks
-const FIELD_BLUR_DELAY = 300; // ms delay before hiding field action buttons
+const FIELD_BLUR_DELAY = 500; // ms delay before hiding field action buttons
 
 // Track if mouse is over action buttons
 const isMouseOverActionButtons = ref(false);
@@ -861,9 +861,9 @@ function roundToNearest10(value: number): number {
 }
 
 // PDF export scaling constants
-const PDF_EXPORT_MIN_SCALE = 2; // Minimum scale factor for PDF export
-const PDF_EXPORT_MAX_SCALE = 4; // Maximum scale factor for PDF export
-const PDF_EXPORT_ZOOM_DIVISOR = 5; // Divide zoom level by this to get base scale
+const PDF_EXPORT_MIN_SCALE = 3; // Minimum scale factor for PDF export
+const PDF_EXPORT_MAX_SCALE = 6; // Maximum scale factor for PDF export
+const PDF_EXPORT_ZOOM_DIVISOR = 4; // Divide zoom level by this to get base scale
 
 // Clear origin field
 function clearOrigin() {
@@ -1692,6 +1692,14 @@ function clearAllPlaces() {
 function clearAllRoutes() {
   savedRoutes.value = [];
   saveToLocalStorage();
+  // Clear routes from map view
+  if (routeSource) {
+    routeSource.clear();
+  }
+  // Also clear current route info
+  currentRouteCoordinates.value = [];
+  routeInfo.value = null;
+  showStatus('All routes cleared', 'success');
 }
 
 function refreshMarkersFromSaved() {
