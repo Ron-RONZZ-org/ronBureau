@@ -60,30 +60,64 @@
 
           <!-- Directions Search -->
           <div v-if="searchMode === 'directions'" class="search-section">
-            <!-- Action Buttons Row -->
-            <div class="action-buttons-row">
-              <button class="action-btn" @click="useCurrentLocationFor('origin')" :disabled="isGettingLocation" title="Use my location">
-                📍 My Location
-              </button>
-              <button class="action-btn" :class="{ active: pickPointMode === 'origin' }" @click="togglePickPoint('origin')" title="Pick point on map">
-                🗺️ Pick on Map
-              </button>
-              <button class="action-btn" @click="showSavedPlacesModal('origin')" title="Pick from saved places">
-                📌 Saved Places
-              </button>
+            <!-- Route Profile Selector -->
+            <div class="route-profile-selector">
+              <label>Route Type:</label>
+              <div class="profile-buttons">
+                <button 
+                  class="profile-btn" 
+                  :class="{ active: routeProfile === 'car' }"
+                  @click="routeProfile = 'car'"
+                  title="Car"
+                >🚗 Car</button>
+                <button 
+                  class="profile-btn" 
+                  :class="{ active: routeProfile === 'bike' }"
+                  @click="routeProfile = 'bike'"
+                  title="Bike"
+                >🚴 Bike</button>
+                <button 
+                  class="profile-btn" 
+                  :class="{ active: routeProfile === 'foot' }"
+                  @click="routeProfile = 'foot'"
+                  title="Walking"
+                >🚶 Walk</button>
+              </div>
             </div>
 
             <div class="input-group">
               <label for="origin">Origin</label>
-              <input
-                id="origin"
-                v-model="originQuery"
-                type="text"
-                class="input"
-                :class="{ 'pick-mode': pickPointMode === 'origin' }"
-                placeholder="Starting point..."
-                @input="debouncedSearchOrigin"
-              />
+              <div class="input-with-actions">
+                <input
+                  id="origin"
+                  v-model="originQuery"
+                  type="text"
+                  class="input"
+                  :class="{ 'pick-mode': pickPointMode === 'origin' }"
+                  placeholder="Starting point..."
+                  @input="debouncedSearchOrigin"
+                  @focus="focusedField = 'origin'"
+                  @blur="handleFieldBlur"
+                />
+                <button 
+                  v-if="originQuery" 
+                  class="clear-input-btn" 
+                  @click="clearOrigin" 
+                  title="Clear"
+                >×</button>
+              </div>
+              <!-- Unified action buttons - shown on focus -->
+              <div v-if="focusedField === 'origin'" class="field-action-buttons">
+                <button class="action-btn-sm" @click.prevent="useCurrentLocationFor('origin')" :disabled="isGettingLocation" title="Use my location">
+                  📍 My Location
+                </button>
+                <button class="action-btn-sm" :class="{ active: pickPointMode === 'origin' }" @click.prevent="togglePickPoint('origin')" title="Pick point on map">
+                  🗺️ Pick on Map
+                </button>
+                <button class="action-btn-sm" @click.prevent="showSavedPlacesModal('origin')" title="Pick from saved places">
+                  📌 Saved
+                </button>
+              </div>
             </div>
             <div v-if="originResults.length > 0 && showOriginResults" class="search-results">
               <div
@@ -104,28 +138,39 @@
             <div class="stops-section">
               <div class="stops-header">
                 <label>Stops</label>
-                <div class="stop-action-buttons">
-                  <button class="action-btn-sm" @click="useCurrentLocationFor('stop')" :disabled="isGettingLocation" title="Use my location">
-                    📍
-                  </button>
-                  <button class="action-btn-sm" :class="{ active: pickPointMode === 'stop' }" @click="togglePickPoint('stop')" title="Pick point on map">
-                    🗺️
-                  </button>
-                  <button class="action-btn-sm" @click="showSavedPlacesModal('stop')" title="Pick from saved places">
-                    📌
-                  </button>
-                </div>
               </div>
               <div class="input-group">
-                <input
-                  v-model="stopQuery"
-                  type="text"
-                  class="input"
-                  :class="{ 'pick-mode': pickPointMode === 'stop' }"
-                  placeholder="Add a stop..."
-                  @input="debouncedSearchStop"
-                  @keyup.enter="addStopFromSearch"
-                />
+                <div class="input-with-actions">
+                  <input
+                    v-model="stopQuery"
+                    type="text"
+                    class="input"
+                    :class="{ 'pick-mode': pickPointMode === 'stop' }"
+                    placeholder="Add a stop..."
+                    @input="debouncedSearchStop"
+                    @keyup.enter="addStopFromSearch"
+                    @focus="focusedField = 'stop'"
+                    @blur="handleFieldBlur"
+                  />
+                  <button 
+                    v-if="stopQuery" 
+                    class="clear-input-btn" 
+                    @click="stopQuery = ''; stopResults = [];" 
+                    title="Clear"
+                  >×</button>
+                </div>
+                <!-- Unified action buttons - shown on focus -->
+                <div v-if="focusedField === 'stop'" class="field-action-buttons">
+                  <button class="action-btn-sm" @click.prevent="useCurrentLocationFor('stop')" :disabled="isGettingLocation" title="Use my location">
+                    📍 My Location
+                  </button>
+                  <button class="action-btn-sm" :class="{ active: pickPointMode === 'stop' }" @click.prevent="togglePickPoint('stop')" title="Pick point on map">
+                    🗺️ Pick on Map
+                  </button>
+                  <button class="action-btn-sm" @click.prevent="showSavedPlacesModal('stop')" title="Pick from saved places">
+                    📌 Saved
+                  </button>
+                </div>
               </div>
               <div v-if="stopResults.length > 0 && showStopResults" class="search-results">
                 <div
@@ -168,30 +213,39 @@
               </div>
             </div>
 
-            <!-- Destination Action Buttons -->
-            <div class="action-buttons-row">
-              <button class="action-btn" @click="useCurrentLocationFor('destination')" :disabled="isGettingLocation" title="Use my location">
-                📍 My Location
-              </button>
-              <button class="action-btn" :class="{ active: pickPointMode === 'destination' }" @click="togglePickPoint('destination')" title="Pick point on map">
-                🗺️ Pick on Map
-              </button>
-              <button class="action-btn" @click="showSavedPlacesModal('destination')" title="Pick from saved places">
-                📌 Saved Places
-              </button>
-            </div>
-
             <div class="input-group">
               <label for="destination">Destination</label>
-              <input
-                id="destination"
-                v-model="destinationQuery"
-                type="text"
-                class="input"
-                :class="{ 'pick-mode': pickPointMode === 'destination' }"
-                placeholder="Destination..."
-                @input="debouncedSearchDestination"
-              />
+              <div class="input-with-actions">
+                <input
+                  id="destination"
+                  v-model="destinationQuery"
+                  type="text"
+                  class="input"
+                  :class="{ 'pick-mode': pickPointMode === 'destination' }"
+                  placeholder="Destination..."
+                  @input="debouncedSearchDestination"
+                  @focus="focusedField = 'destination'"
+                  @blur="handleFieldBlur"
+                />
+                <button 
+                  v-if="destinationQuery" 
+                  class="clear-input-btn" 
+                  @click="clearDestination" 
+                  title="Clear"
+                >×</button>
+              </div>
+              <!-- Unified action buttons - shown on focus -->
+              <div v-if="focusedField === 'destination'" class="field-action-buttons">
+                <button class="action-btn-sm" @click.prevent="useCurrentLocationFor('destination')" :disabled="isGettingLocation" title="Use my location">
+                  📍 My Location
+                </button>
+                <button class="action-btn-sm" :class="{ active: pickPointMode === 'destination' }" @click.prevent="togglePickPoint('destination')" title="Pick point on map">
+                  🗺️ Pick on Map
+                </button>
+                <button class="action-btn-sm" @click.prevent="showSavedPlacesModal('destination')" title="Pick from saved places">
+                  📌 Saved
+                </button>
+              </div>
             </div>
             <div v-if="destinationResults.length > 0 && showDestinationResults" class="search-results">
               <div
@@ -220,9 +274,15 @@
               <h4>Route Info</h4>
               <p><strong>Distance:</strong> {{ routeInfo.distance }}</p>
               <p><strong>Duration:</strong> {{ routeInfo.duration }}</p>
-              <button class="btn btn-outline btn-sm w-full mt-2" @click="saveCurrentRoute">
-                💾 Save Route
-              </button>
+              <p><strong>Profile:</strong> {{ routeProfile === 'car' ? '🚗 Car' : routeProfile === 'bike' ? '🚴 Bike' : '🚶 Walk' }}</p>
+              <div class="route-actions">
+                <button class="btn btn-outline btn-sm" @click="saveCurrentRoute">
+                  💾 Save
+                </button>
+                <button class="btn btn-outline btn-sm" @click="clearCurrentRoute">
+                  🗑️ Clear
+                </button>
+              </div>
             </div>
           </div>
 
@@ -248,6 +308,10 @@
                 <button class="remove-btn" @click.stop="removePlace(index)">×</button>
               </div>
             </div>
+            <!-- Manage Lists Button -->
+            <button class="btn btn-outline btn-sm w-full mt-2" @click="showPlaceListsModal = true">
+              📋 Manage Lists
+            </button>
           </div>
 
           <!-- Saved Routes -->
@@ -272,6 +336,10 @@
                 <button class="remove-btn" @click.stop="removeRoute(index)">×</button>
               </div>
             </div>
+            <!-- Manage Lists Button -->
+            <button class="btn btn-outline btn-sm w-full mt-2" @click="showRouteListsModal = true">
+              📋 Manage Lists
+            </button>
           </div>
 
           <!-- Export/Import Section -->
@@ -290,7 +358,7 @@
             
             <div class="geojson-buttons">
               <button class="btn btn-outline" @click="exportGeoJSON">📄 GeoJSON</button>
-              <button class="btn btn-outline" @click="showPdfExportModal = true">📑 PDF Map</button>
+              <button class="btn btn-outline" @click="openPdfExportModal">📑 PDF Map</button>
             </div>
             <div class="geojson-buttons mt-2">
               <label class="btn btn-outline import-label w-full">
@@ -467,6 +535,112 @@
             </div>
           </div>
         </div>
+
+        <!-- Place Lists Management Modal -->
+        <div v-if="showPlaceListsModal" class="modal-overlay" @click.self="showPlaceListsModal = false">
+          <div class="modal-content modal-large">
+            <h3>📋 Manage Place Lists</h3>
+            <p class="modal-description">Create named lists to organize your places (e.g., "Delivery Mondays", "worktrip 12-12-2025")</p>
+            
+            <div class="list-create-form">
+              <input 
+                v-model="newPlaceListName" 
+                type="text" 
+                class="input" 
+                placeholder="New list name..."
+                @keyup.enter="createPlaceList"
+              />
+              <button class="btn btn-primary" @click="createPlaceList" :disabled="!newPlaceListName.trim()">
+                + Create
+              </button>
+            </div>
+            
+            <div v-if="placeLists.length === 0" class="no-saved">
+              <p>No place lists yet. Create one above!</p>
+            </div>
+            <div v-else class="lists-container">
+              <div 
+                v-for="list in placeLists" 
+                :key="list.id" 
+                class="list-item"
+              >
+                <div class="list-header">
+                  <span class="list-name">{{ list.name }}</span>
+                  <span class="list-count">{{ list.places?.length || 0 }} places</span>
+                  <button class="edit-btn" @click="editPlaceListName(list)" title="Rename">✏️</button>
+                  <button class="remove-btn" @click="deletePlaceList(list.id)">×</button>
+                </div>
+                <div v-if="list.places?.length > 0" class="list-items-preview">
+                  <span v-for="place in list.places.slice(0, 3)" :key="place.id" class="preview-item">
+                    {{ place.icon || '📍' }} {{ place.name }}
+                  </span>
+                  <span v-if="list.places.length > 3" class="preview-more">+{{ list.places.length - 3 }} more</span>
+                </div>
+                <button class="btn btn-outline btn-sm" @click="loadPlaceList(list)">Load</button>
+              </div>
+            </div>
+            
+            <div class="modal-buttons">
+              <button class="btn btn-outline" @click="showPlaceListsModal = false">Close</button>
+              <button class="btn btn-primary" @click="saveCurrentPlacesToList" :disabled="savedPlaces.length === 0">
+                💾 Save Current Places to New List
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Route Lists Management Modal -->
+        <div v-if="showRouteListsModal" class="modal-overlay" @click.self="showRouteListsModal = false">
+          <div class="modal-content modal-large">
+            <h3>📋 Manage Route Lists</h3>
+            <p class="modal-description">Create named lists to organize your routes (e.g., "Delivery Mondays", "worktrip 12-12-2025")</p>
+            
+            <div class="list-create-form">
+              <input 
+                v-model="newRouteListName" 
+                type="text" 
+                class="input" 
+                placeholder="New list name..."
+                @keyup.enter="createRouteList"
+              />
+              <button class="btn btn-primary" @click="createRouteList" :disabled="!newRouteListName.trim()">
+                + Create
+              </button>
+            </div>
+            
+            <div v-if="routeLists.length === 0" class="no-saved">
+              <p>No route lists yet. Create one above!</p>
+            </div>
+            <div v-else class="lists-container">
+              <div 
+                v-for="list in routeLists" 
+                :key="list.id" 
+                class="list-item"
+              >
+                <div class="list-header">
+                  <span class="list-name">{{ list.name }}</span>
+                  <span class="list-count">{{ list.routes?.length || 0 }} routes</span>
+                  <button class="edit-btn" @click="editRouteListName(list)" title="Rename">✏️</button>
+                  <button class="remove-btn" @click="deleteRouteList(list.id)">×</button>
+                </div>
+                <div v-if="list.routes?.length > 0" class="list-items-preview">
+                  <span v-for="route in list.routes.slice(0, 3)" :key="route.id" class="preview-item">
+                    🛤️ {{ route.name }}
+                  </span>
+                  <span v-if="list.routes.length > 3" class="preview-more">+{{ list.routes.length - 3 }} more</span>
+                </div>
+                <button class="btn btn-outline btn-sm" @click="loadRouteList(list)">Load</button>
+              </div>
+            </div>
+            
+            <div class="modal-buttons">
+              <button class="btn btn-outline" @click="showRouteListsModal = false">Close</button>
+              <button class="btn btn-primary" @click="saveCurrentRoutesToList" :disabled="savedRoutes.length === 0">
+                💾 Save Current Routes to New List
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </NuxtLayout>
   </div>
@@ -568,6 +742,12 @@ const showStopResults = ref(false);
 // Pick point mode
 const pickPointMode = ref<'origin' | 'stop' | 'destination' | null>(null);
 
+// Focused field for showing action buttons
+const focusedField = ref<'origin' | 'stop' | 'destination' | null>(null);
+
+// Route profile (car/bike/foot)
+const routeProfile = ref<'car' | 'bike' | 'foot'>('car');
+
 // Saved places picker modal
 const showSavedPlacesPickerModal = ref(false);
 const savedPlacesPickerTarget = ref<'origin' | 'stop' | 'destination' | null>(null);
@@ -629,6 +809,16 @@ const editRouteForm = ref({
   name: '',
 });
 
+// Place Lists Modal
+const showPlaceListsModal = ref(false);
+const placeLists = ref<{ id: string; name: string; description?: string; places?: SavedPlace[] }[]>([]);
+const newPlaceListName = ref('');
+
+// Route Lists Modal
+const showRouteListsModal = ref(false);
+const routeLists = ref<{ id: string; name: string; description?: string; routes?: SavedRoute[] }[]>([]);
+const newRouteListName = ref('');
+
 // Show status message helper
 function showStatus(message: string, type: 'success' | 'error') {
   statusMessage.value = message;
@@ -637,6 +827,111 @@ function showStatus(message: string, type: 'success' | 'error') {
     statusMessage.value = '';
     statusType.value = '';
   }, 3000);
+}
+
+// Handle field blur with delay to allow button clicks
+function handleFieldBlur() {
+  setTimeout(() => {
+    focusedField.value = null;
+  }, 200);
+}
+
+// Clear origin field
+function clearOrigin() {
+  if (routeInfo.value) {
+    // Route already calculated, ask user
+    showClearRouteConfirm('origin');
+  } else {
+    originQuery.value = '';
+    origin.value = null;
+    originResults.value = [];
+    showOriginResults.value = false;
+    // Remove origin marker
+    if (markersSource) {
+      const features = markersSource.getFeatures();
+      features.forEach((f) => {
+        if (f.get('type') === 'origin') {
+          markersSource?.removeFeature(f);
+        }
+      });
+    }
+  }
+}
+
+// Clear destination field
+function clearDestination() {
+  if (routeInfo.value) {
+    // Route already calculated, ask user
+    showClearRouteConfirm('destination');
+  } else {
+    destinationQuery.value = '';
+    destination.value = null;
+    destinationResults.value = [];
+    showDestinationResults.value = false;
+    // Remove destination marker
+    if (markersSource) {
+      const features = markersSource.getFeatures();
+      features.forEach((f) => {
+        if (f.get('type') === 'destination') {
+          markersSource?.removeFeature(f);
+        }
+      });
+    }
+  }
+}
+
+// Show clear route confirmation
+function showClearRouteConfirm(field: 'origin' | 'destination') {
+  const saveRoute = confirm('A route is currently displayed. Would you like to save it before clearing?\n\nClick OK to save the route, or Cancel to just clear it.');
+  if (saveRoute) {
+    saveCurrentRoute();
+  }
+  // Clear the route
+  clearCurrentRoute();
+  // Now clear the field
+  if (field === 'origin') {
+    originQuery.value = '';
+    origin.value = null;
+    originResults.value = [];
+  } else {
+    destinationQuery.value = '';
+    destination.value = null;
+    destinationResults.value = [];
+  }
+}
+
+// Clear current route from map
+function clearCurrentRoute() {
+  if (routeSource) {
+    routeSource.clear();
+  }
+  routeInfo.value = null;
+  currentRouteCoordinates.value = [];
+  // Clear markers but keep origin/destination if set
+  if (markersSource) {
+    const features = markersSource.getFeatures();
+    features.forEach((f) => {
+      const type = f.get('type');
+      if (type === 'origin' || type === 'destination' || type === 'stop') {
+        markersSource?.removeFeature(f);
+      }
+    });
+  }
+  // Clear stops
+  stops.value = [];
+  // Clear origin and destination
+  origin.value = null;
+  destination.value = null;
+  originQuery.value = '';
+  destinationQuery.value = '';
+  showStatus('Route cleared', 'success');
+}
+
+// Open PDF export modal with synced export content
+function openPdfExportModal() {
+  // Sync export content with the export type from Export/Import section
+  pdfOptions.value.exportContent = exportType.value;
+  showPdfExportModal.value = true;
 }
 
 // Debounce helper
@@ -1126,7 +1421,8 @@ async function getDirections() {
       `point=${destination.value.lat},${destination.value.lon}`,
     ].join('&');
     
-    const url = `https://graphhopper.com/api/1/route?${points}&vehicle=car&locale=en&points_encoded=false&key=${apiKey}`;
+    // Use selected route profile (vehicle type)
+    const url = `https://graphhopper.com/api/1/route?${points}&vehicle=${routeProfile.value}&locale=en&points_encoded=false&key=${apiKey}`;
 
     const response = await fetch(url);
     const data = await response.json();
@@ -1609,6 +1905,54 @@ async function exportPdfMap() {
   showStatus('Generating PDF...', 'success');
   
   try {
+    // Save current view state
+    const originalCenter = map.getView().getCenter();
+    const originalZoom = map.getView().getZoom();
+    
+    // If autoscale is enabled, fit the view to all visible places and routes
+    if (pdfOptions.value.scale === 'auto') {
+      const extents: number[][] = [];
+      
+      // Collect extents from places if showing places
+      if (pdfOptions.value.exportContent !== 'routes' && markersSource) {
+        const placeFeatures = markersSource.getFeatures().filter(f => f.get('type') === 'place');
+        if (placeFeatures.length > 0) {
+          placeFeatures.forEach(f => {
+            const geom = f.getGeometry();
+            if (geom) {
+              extents.push(geom.getExtent());
+            }
+          });
+        }
+      }
+      
+      // Collect extents from routes if showing routes
+      if (pdfOptions.value.exportContent !== 'places' && routeSource) {
+        const routeFeatures = routeSource.getFeatures();
+        if (routeFeatures.length > 0) {
+          routeFeatures.forEach(f => {
+            const geom = f.getGeometry();
+            if (geom) {
+              extents.push(geom.getExtent());
+            }
+          });
+        }
+      }
+      
+      // Calculate combined extent and fit view
+      if (extents.length > 0) {
+        let combinedExtent = extents[0].slice();
+        for (let i = 1; i < extents.length; i++) {
+          combinedExtent[0] = Math.min(combinedExtent[0], extents[i][0]);
+          combinedExtent[1] = Math.min(combinedExtent[1], extents[i][1]);
+          combinedExtent[2] = Math.max(combinedExtent[2], extents[i][2]);
+          combinedExtent[3] = Math.max(combinedExtent[3], extents[i][3]);
+        }
+        map.getView().fit(combinedExtent, { padding: [50, 50, 50, 50] });
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+    }
+    
     // Save current location marker features before clearing
     const savedLocationFeatures: Feature[] = [];
     if (currentLocationSource) {
@@ -1663,9 +2007,12 @@ async function exportPdfMap() {
       return;
     }
     
-    // Create a higher resolution export canvas
+    // Create a higher resolution export canvas for better label legibility
+    // Use zoom-based scaling: higher zoom = higher resolution for text clarity
     const exportCanvas = document.createElement('canvas');
-    const scale = 2; // Higher resolution for better quality
+    const currentZoom = map.getView().getZoom() || 10;
+    // Scale factor: base 2x, up to 4x for high zoom levels (street level)
+    const scale = Math.min(4, Math.max(2, Math.floor(currentZoom / 5)));
     exportCanvas.width = mapCanvas.width * scale;
     exportCanvas.height = mapCanvas.height * scale;
     const ctx = exportCanvas.getContext('2d');
@@ -1674,6 +2021,11 @@ async function exportPdfMap() {
       originalMarkersState.forEach(f => markersSource?.addFeature(f));
       originalRouteState.forEach(f => routeSource?.addFeature(f));
       savedLocationFeatures.forEach(f => currentLocationSource?.addFeature(f));
+      // Restore original view if autoscale was used
+      if (pdfOptions.value.scale === 'auto' && originalCenter && originalZoom) {
+        map.getView().setCenter(originalCenter);
+        map.getView().setZoom(originalZoom);
+      }
       showStatus('Could not create export canvas', 'error');
       return;
     }
@@ -1756,10 +2108,14 @@ async function exportPdfMap() {
           let scaleLabel: string;
           
           if (distance > 1000) {
-            scaleDistance = Math.round(distance / 1000);
+            // Round to nearest 10 for km values
+            scaleDistance = Math.round(distance / 1000 / 10) * 10;
+            if (scaleDistance === 0) scaleDistance = Math.round(distance / 1000);
             scaleLabel = `${scaleDistance} km`;
           } else {
-            scaleDistance = Math.round(distance);
+            // Round to nearest 10 for meter values
+            scaleDistance = Math.round(distance / 10) * 10;
+            if (scaleDistance === 0) scaleDistance = Math.round(distance);
             scaleLabel = `${scaleDistance} m`;
           }
           
@@ -1827,6 +2183,12 @@ async function exportPdfMap() {
     savedLocationFeatures.forEach((f) => {
       currentLocationSource?.addFeature(f);
     });
+    
+    // Restore original view if autoscale was used
+    if (pdfOptions.value.scale === 'auto' && originalCenter && originalZoom) {
+      map.getView().setCenter(originalCenter);
+      map.getView().setZoom(originalZoom);
+    }
     
     pdf.save(`map-${new Date().toISOString().split('T')[0]}.pdf`);
     showStatus('PDF exported successfully!', 'success');
@@ -2007,6 +2369,10 @@ onMounted(() => {
   
   // Load map preferences from API if authenticated
   loadMapPreferencesFromAPI();
+  
+  // Load lists from API if authenticated
+  loadPlaceListsFromAPI();
+  loadRouteListsFromAPI();
 
   if (mapContainer.value) {
     markersSource = new VectorSource();
@@ -2044,6 +2410,360 @@ onMounted(() => {
     map.on('click', handleMapClick);
   }
 });
+
+// Load place lists from API
+async function loadPlaceListsFromAPI() {
+  if (!auth.isAuthenticated || !auth.token) return;
+  
+  try {
+    const response = await $fetch<{ id: string; name: string; description?: string; places?: SavedPlace[] }[]>(
+      `${config.public.apiBase}/maps/place-lists`,
+      {
+        headers: {
+          Authorization: `Bearer ${auth.token}`,
+        },
+      }
+    );
+    placeLists.value = response;
+  } catch (error) {
+    console.error('Failed to load place lists:', error);
+  }
+}
+
+// Load route lists from API
+async function loadRouteListsFromAPI() {
+  if (!auth.isAuthenticated || !auth.token) return;
+  
+  try {
+    const response = await $fetch<{ id: string; name: string; description?: string; routes?: SavedRoute[] }[]>(
+      `${config.public.apiBase}/maps/route-lists`,
+      {
+        headers: {
+          Authorization: `Bearer ${auth.token}`,
+        },
+      }
+    );
+    routeLists.value = response;
+  } catch (error) {
+    console.error('Failed to load route lists:', error);
+  }
+}
+
+// Create place list
+async function createPlaceList() {
+  if (!newPlaceListName.value.trim()) return;
+  if (!auth.isAuthenticated || !auth.token) {
+    showStatus('Please log in to create lists', 'error');
+    return;
+  }
+  
+  try {
+    await $fetch(`${config.public.apiBase}/maps/place-lists`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+      },
+      body: { name: newPlaceListName.value.trim() },
+    });
+    
+    newPlaceListName.value = '';
+    await loadPlaceListsFromAPI();
+    showStatus('Place list created!', 'success');
+  } catch (error) {
+    console.error('Failed to create place list:', error);
+    showStatus('Failed to create list', 'error');
+  }
+}
+
+// Create route list
+async function createRouteList() {
+  if (!newRouteListName.value.trim()) return;
+  if (!auth.isAuthenticated || !auth.token) {
+    showStatus('Please log in to create lists', 'error');
+    return;
+  }
+  
+  try {
+    await $fetch(`${config.public.apiBase}/maps/route-lists`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+      },
+      body: { name: newRouteListName.value.trim() },
+    });
+    
+    newRouteListName.value = '';
+    await loadRouteListsFromAPI();
+    showStatus('Route list created!', 'success');
+  } catch (error) {
+    console.error('Failed to create route list:', error);
+    showStatus('Failed to create list', 'error');
+  }
+}
+
+// Delete place list
+async function deletePlaceList(listId: string) {
+  if (!confirm('Are you sure you want to delete this list? Places in the list will not be deleted.')) return;
+  if (!auth.isAuthenticated || !auth.token) return;
+  
+  try {
+    await $fetch(`${config.public.apiBase}/maps/place-lists/${listId}`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+      },
+    });
+    
+    await loadPlaceListsFromAPI();
+    showStatus('List deleted!', 'success');
+  } catch (error) {
+    console.error('Failed to delete place list:', error);
+    showStatus('Failed to delete list', 'error');
+  }
+}
+
+// Delete route list
+async function deleteRouteList(listId: string) {
+  if (!confirm('Are you sure you want to delete this list? Routes in the list will not be deleted.')) return;
+  if (!auth.isAuthenticated || !auth.token) return;
+  
+  try {
+    await $fetch(`${config.public.apiBase}/maps/route-lists/${listId}`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+      },
+    });
+    
+    await loadRouteListsFromAPI();
+    showStatus('List deleted!', 'success');
+  } catch (error) {
+    console.error('Failed to delete route list:', error);
+    showStatus('Failed to delete list', 'error');
+  }
+}
+
+// Edit place list name
+async function editPlaceListName(list: { id: string; name: string }) {
+  const newName = prompt('Enter new name for the list:', list.name);
+  if (!newName || newName.trim() === list.name) return;
+  if (!auth.isAuthenticated || !auth.token) return;
+  
+  try {
+    await $fetch(`${config.public.apiBase}/maps/place-lists/${list.id}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+      },
+      body: { name: newName.trim() },
+    });
+    
+    await loadPlaceListsFromAPI();
+    showStatus('List renamed!', 'success');
+  } catch (error) {
+    console.error('Failed to rename place list:', error);
+    showStatus('Failed to rename list', 'error');
+  }
+}
+
+// Edit route list name
+async function editRouteListName(list: { id: string; name: string }) {
+  const newName = prompt('Enter new name for the list:', list.name);
+  if (!newName || newName.trim() === list.name) return;
+  if (!auth.isAuthenticated || !auth.token) return;
+  
+  try {
+    await $fetch(`${config.public.apiBase}/maps/route-lists/${list.id}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+      },
+      body: { name: newName.trim() },
+    });
+    
+    await loadRouteListsFromAPI();
+    showStatus('List renamed!', 'success');
+  } catch (error) {
+    console.error('Failed to rename route list:', error);
+    showStatus('Failed to rename list', 'error');
+  }
+}
+
+// Load place list
+function loadPlaceList(list: { id: string; name: string; places?: SavedPlace[] }) {
+  if (!list.places || list.places.length === 0) {
+    showStatus('This list is empty', 'error');
+    return;
+  }
+  
+  // Clear current places
+  savedPlaces.value = [];
+  if (markersSource) {
+    const features = markersSource.getFeatures();
+    features.forEach((f) => {
+      if (f.get('type') === 'place') {
+        markersSource?.removeFeature(f);
+      }
+    });
+  }
+  
+  // Load places from list
+  list.places.forEach((place) => {
+    savedPlaces.value.push({
+      id: place.id,
+      name: place.name,
+      lon: place.lon,
+      lat: place.lat,
+      icon: place.icon,
+      color: place.color,
+    });
+    addMarker(place.lon, place.lat, place.name, place.color);
+  });
+  
+  saveToLocalStorage();
+  showPlaceListsModal.value = false;
+  showStatus(`Loaded list: ${list.name}`, 'success');
+}
+
+// Load route list
+function loadRouteList(list: { id: string; name: string; routes?: SavedRoute[] }) {
+  if (!list.routes || list.routes.length === 0) {
+    showStatus('This list is empty', 'error');
+    return;
+  }
+  
+  // Clear current routes
+  savedRoutes.value = [];
+  if (routeSource) {
+    routeSource.clear();
+  }
+  
+  // Load routes from list - just add them to saved routes, don't draw all
+  list.routes.forEach((route) => {
+    savedRoutes.value.push({
+      id: route.id,
+      name: route.name,
+      origin: { name: route.originName, address: '', lon: route.originLon, lat: route.originLat },
+      destination: { name: route.destName, address: '', lon: route.destLon, lat: route.destLat },
+      stops: route.stops ? JSON.parse(route.stops) : [],
+      distance: route.distance,
+      duration: route.duration,
+      coordinates: JSON.parse(route.coordinates),
+    });
+  });
+  
+  saveToLocalStorage();
+  showRouteListsModal.value = false;
+  showStatus(`Loaded list: ${list.name}`, 'success');
+}
+
+// Save current places to a new list
+async function saveCurrentPlacesToList() {
+  if (savedPlaces.value.length === 0) {
+    showStatus('No places to save', 'error');
+    return;
+  }
+  
+  const listName = prompt('Enter a name for the new list:');
+  if (!listName || !listName.trim()) return;
+  
+  if (!auth.isAuthenticated || !auth.token) {
+    showStatus('Please log in to save lists', 'error');
+    return;
+  }
+  
+  try {
+    // Create the list
+    const listResponse = await $fetch<{ id: string }>(`${config.public.apiBase}/maps/place-lists`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+      },
+      body: { name: listName.trim() },
+    });
+    
+    // Add all current places to the list
+    for (const place of savedPlaces.value) {
+      await $fetch(`${config.public.apiBase}/maps/places`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${auth.token}`,
+        },
+        body: {
+          name: place.name,
+          lon: place.lon,
+          lat: place.lat,
+          icon: place.icon,
+          color: place.color,
+          listId: listResponse.id,
+        },
+      });
+    }
+    
+    await loadPlaceListsFromAPI();
+    showStatus(`Saved ${savedPlaces.value.length} places to list: ${listName}`, 'success');
+  } catch (error) {
+    console.error('Failed to save places to list:', error);
+    showStatus('Failed to save places', 'error');
+  }
+}
+
+// Save current routes to a new list
+async function saveCurrentRoutesToList() {
+  if (savedRoutes.value.length === 0) {
+    showStatus('No routes to save', 'error');
+    return;
+  }
+  
+  const listName = prompt('Enter a name for the new list:');
+  if (!listName || !listName.trim()) return;
+  
+  if (!auth.isAuthenticated || !auth.token) {
+    showStatus('Please log in to save lists', 'error');
+    return;
+  }
+  
+  try {
+    // Create the list
+    const listResponse = await $fetch<{ id: string }>(`${config.public.apiBase}/maps/route-lists`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+      },
+      body: { name: listName.trim() },
+    });
+    
+    // Add all current routes to the list
+    for (const route of savedRoutes.value) {
+      await $fetch(`${config.public.apiBase}/maps/routes`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${auth.token}`,
+        },
+        body: {
+          name: route.name,
+          originName: route.origin.name,
+          originLon: route.origin.lon,
+          originLat: route.origin.lat,
+          destName: route.destination.name,
+          destLon: route.destination.lon,
+          destLat: route.destination.lat,
+          stops: JSON.stringify(route.stops),
+          distance: route.distance,
+          duration: route.duration,
+          coordinates: JSON.stringify(route.coordinates),
+          listId: listResponse.id,
+        },
+      });
+    }
+    
+    await loadRouteListsFromAPI();
+    showStatus(`Saved ${savedRoutes.value.length} routes to list: ${listName}`, 'success');
+  } catch (error) {
+    console.error('Failed to save routes to list:', error);
+    showStatus('Failed to save routes', 'error');
+  }
+}
 
 onUnmounted(() => {
   if (map) {
@@ -2288,6 +3008,127 @@ onUnmounted(() => {
 .route-info p {
   font-size: 0.875rem;
   margin-bottom: 0.25rem;
+}
+
+.route-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.route-actions .btn {
+  flex: 1;
+}
+
+/* Route profile selector */
+.route-profile-selector {
+  margin-bottom: 0.75rem;
+}
+
+.route-profile-selector label {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin-bottom: 0.25rem;
+  display: block;
+}
+
+.profile-buttons {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.profile-btn {
+  flex: 1;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.profile-btn:hover {
+  border-color: var(--color-primary);
+}
+
+.profile-btn.active {
+  background: var(--color-primary);
+  color: white;
+  border-color: var(--color-primary);
+}
+
+/* Input with actions wrapper */
+.input-with-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-with-actions .input {
+  flex: 1;
+  padding-right: 2rem;
+}
+
+.clear-input-btn {
+  position: absolute;
+  right: 0.5rem;
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.clear-input-btn:hover {
+  color: var(--color-error);
+}
+
+/* Field action buttons - shown on focus */
+.field-action-buttons {
+  display: flex;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+  padding: 0.25rem;
+  background: var(--color-background);
+  border-radius: var(--radius);
+}
+
+.field-action-buttons .action-btn-sm {
+  flex: 1;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: var(--transition);
+  white-space: nowrap;
+}
+
+.field-action-buttons .action-btn-sm:hover {
+  border-color: var(--color-primary);
+  background: var(--color-background);
+}
+
+.field-action-buttons .action-btn-sm.active {
+  background: var(--color-primary);
+  color: white;
+  border-color: var(--color-primary);
+}
+
+.field-action-buttons .action-btn-sm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .saved-section {
@@ -2634,10 +3475,76 @@ onUnmounted(() => {
   width: 90%;
 }
 
+.modal-content.modal-large {
+  max-width: 600px;
+}
+
 .modal-content h3 {
   font-size: 1.125rem;
   font-weight: 600;
   margin-bottom: 1rem;
+}
+
+/* List management styles */
+.list-create-form {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.list-create-form .input {
+  flex: 1;
+}
+
+.lists-container {
+  max-height: 300px;
+  overflow-y: auto;
+  margin-bottom: 1rem;
+}
+
+.list-item {
+  background: var(--color-background);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.list-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.list-name {
+  flex: 1;
+  font-weight: 500;
+  font-size: 0.875rem;
+}
+
+.list-count {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.list-items-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.preview-item {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius);
+}
+
+.preview-more {
+  font-size: 0.75rem;
+  color: var(--color-primary);
 }
 
 .checkbox-group {
