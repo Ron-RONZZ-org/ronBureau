@@ -87,6 +87,8 @@ ronBureau/
    npm run start:dev
    ```
 
+> Reminder : All `prisma` operations MUST be run in `backend`. 
+
 The backend API will be available at `http://localhost:3001`.
 
 ### Frontend Setup
