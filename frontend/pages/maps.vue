@@ -830,11 +830,24 @@ function showStatus(message: string, type: 'success' | 'error') {
 }
 
 // Handle field blur with delay to allow button clicks
+const FIELD_BLUR_DELAY = 200; // ms delay before hiding field action buttons
+
 function handleFieldBlur() {
   setTimeout(() => {
     focusedField.value = null;
-  }, 200);
+  }, FIELD_BLUR_DELAY);
 }
+
+// Round a value to the nearest 10
+function roundToNearest10(value: number): number {
+  const rounded = Math.round(value / 10) * 10;
+  return rounded === 0 ? Math.round(value) : rounded;
+}
+
+// PDF export scaling constants
+const PDF_EXPORT_MIN_SCALE = 2; // Minimum scale factor for PDF export
+const PDF_EXPORT_MAX_SCALE = 4; // Maximum scale factor for PDF export
+const PDF_EXPORT_ZOOM_DIVISOR = 5; // Divide zoom level by this to get base scale
 
 // Clear origin field
 function clearOrigin() {
@@ -2011,8 +2024,8 @@ async function exportPdfMap() {
     // Use zoom-based scaling: higher zoom = higher resolution for text clarity
     const exportCanvas = document.createElement('canvas');
     const currentZoom = map.getView().getZoom() || 10;
-    // Scale factor: base 2x, up to 4x for high zoom levels (street level)
-    const scale = Math.min(4, Math.max(2, Math.floor(currentZoom / 5)));
+    // Scale factor: base min scale, up to max scale for high zoom levels (street level)
+    const scale = Math.min(PDF_EXPORT_MAX_SCALE, Math.max(PDF_EXPORT_MIN_SCALE, Math.floor(currentZoom / PDF_EXPORT_ZOOM_DIVISOR)));
     exportCanvas.width = mapCanvas.width * scale;
     exportCanvas.height = mapCanvas.height * scale;
     const ctx = exportCanvas.getContext('2d');
@@ -2109,13 +2122,11 @@ async function exportPdfMap() {
           
           if (distance > 1000) {
             // Round to nearest 10 for km values
-            scaleDistance = Math.round(distance / 1000 / 10) * 10;
-            if (scaleDistance === 0) scaleDistance = Math.round(distance / 1000);
+            scaleDistance = roundToNearest10(distance / 1000);
             scaleLabel = `${scaleDistance} km`;
           } else {
             // Round to nearest 10 for meter values
-            scaleDistance = Math.round(distance / 10) * 10;
-            if (scaleDistance === 0) scaleDistance = Math.round(distance);
+            scaleDistance = roundToNearest10(distance);
             scaleLabel = `${scaleDistance} m`;
           }
           
@@ -2682,9 +2693,9 @@ async function saveCurrentPlacesToList() {
       body: { name: listName.trim() },
     });
     
-    // Add all current places to the list
-    for (const place of savedPlaces.value) {
-      await $fetch(`${config.public.apiBase}/maps/places`, {
+    // Add all current places to the list in parallel
+    await Promise.all(savedPlaces.value.map(place => 
+      $fetch(`${config.public.apiBase}/maps/places`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${auth.token}`,
@@ -2697,8 +2708,8 @@ async function saveCurrentPlacesToList() {
           color: place.color,
           listId: listResponse.id,
         },
-      });
-    }
+      })
+    ));
     
     await loadPlaceListsFromAPI();
     showStatus(`Saved ${savedPlaces.value.length} places to list: ${listName}`, 'success');
@@ -2733,9 +2744,9 @@ async function saveCurrentRoutesToList() {
       body: { name: listName.trim() },
     });
     
-    // Add all current routes to the list
-    for (const route of savedRoutes.value) {
-      await $fetch(`${config.public.apiBase}/maps/routes`, {
+    // Add all current routes to the list in parallel
+    await Promise.all(savedRoutes.value.map(route =>
+      $fetch(`${config.public.apiBase}/maps/routes`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${auth.token}`,
@@ -2754,8 +2765,8 @@ async function saveCurrentRoutesToList() {
           coordinates: JSON.stringify(route.coordinates),
           listId: listResponse.id,
         },
-      });
-    }
+      })
+    ));
     
     await loadRouteListsFromAPI();
     showStatus(`Saved ${savedRoutes.value.length} routes to list: ${listName}`, 'success');
