@@ -358,12 +358,13 @@
             
             <div class="geojson-buttons">
               <button class="btn btn-outline" @click="exportGeoJSON">📄 GeoJSON</button>
+              <button class="btn btn-outline" @click="exportGPX">📍 GPX</button>
               <button class="btn btn-outline" @click="openPdfExportModal">📑 PDF Map</button>
             </div>
             <div class="geojson-buttons mt-2">
               <label class="btn btn-outline import-label w-full">
-                📥 Import GeoJSON
-                <input type="file" accept=".json,.geojson" @change="importGeoJSON" hidden />
+                📥 Import GeoJSON/GPX
+                <input type="file" accept=".json,.geojson,.gpx" @change="importFile" hidden />
               </label>
             </div>
           </div>
@@ -1602,6 +1603,30 @@ function removePlace(index: number) {
 function removeRoute(index: number) {
   savedRoutes.value.splice(index, 1);
   saveToLocalStorage();
+  // Clear routes from map and redraw remaining
+  if (routeSource) {
+    routeSource.clear();
+    // Redraw all remaining saved routes
+    savedRoutes.value.forEach((route) => {
+      if (route.coordinates.length > 0) {
+        const projectedCoords = route.coordinates.map((coord: number[]) => fromLonLat(coord));
+        const routeFeature = new Feature({
+          geometry: new LineString(projectedCoords),
+          type: 'route',
+        });
+        routeFeature.setStyle(
+          new Style({
+            stroke: new Stroke({
+              color: customization.value.routeColor,
+              width: 4,
+            }),
+          })
+        );
+        routeSource?.addFeature(routeFeature);
+      }
+    });
+  }
+  showStatus('Route removed', 'success');
 }
 
 // Edit place
@@ -1923,6 +1948,218 @@ function exportGeoJSON() {
   a.click();
   URL.revokeObjectURL(url);
   showStatus('GeoJSON exported successfully!', 'success');
+}
+
+// GPX Export
+function exportGPX() {
+  let gpxContent = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="RonBureau Maps" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>Map Export</name>
+    <time>${new Date().toISOString()}</time>
+  </metadata>
+`;
+
+  // Add saved places as waypoints if selected
+  if (exportType.value === 'both' || exportType.value === 'places') {
+    savedPlaces.value.forEach((place) => {
+      gpxContent += `  <wpt lat="${place.lat}" lon="${place.lon}">
+    <name>${escapeXml(place.name)}</name>
+    <sym>${place.icon || '📍'}</sym>
+  </wpt>
+`;
+    });
+  }
+
+  // Add routes as tracks if selected
+  if (exportType.value === 'both' || exportType.value === 'routes') {
+    savedRoutes.value.forEach((route) => {
+      if (route.coordinates.length > 0) {
+        gpxContent += `  <trk>
+    <name>${escapeXml(route.name)}</name>
+    <trkseg>
+`;
+        route.coordinates.forEach((coord: number[]) => {
+          gpxContent += `      <trkpt lat="${coord[1]}" lon="${coord[0]}"></trkpt>
+`;
+        });
+        gpxContent += `    </trkseg>
+  </trk>
+`;
+      }
+    });
+    
+    // Also export current route if exists
+    if (currentRouteCoordinates.value.length > 0 && origin.value && destination.value) {
+      gpxContent += `  <trk>
+    <name>${escapeXml(origin.value.name)} → ${escapeXml(destination.value.name)}</name>
+    <trkseg>
+`;
+      currentRouteCoordinates.value.forEach((coord: number[]) => {
+        gpxContent += `      <trkpt lat="${coord[1]}" lon="${coord[0]}"></trkpt>
+`;
+      });
+      gpxContent += `    </trkseg>
+  </trk>
+`;
+    }
+  }
+
+  gpxContent += `</gpx>`;
+
+  if (savedPlaces.value.length === 0 && savedRoutes.value.length === 0 && currentRouteCoordinates.value.length === 0) {
+    showStatus('No data to export', 'error');
+    return;
+  }
+
+  const blob = new Blob([gpxContent], { type: 'application/gpx+xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `map-export-${new Date().toISOString().split('T')[0]}.gpx`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showStatus('GPX exported successfully!', 'success');
+}
+
+// Helper function to escape XML special characters
+function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+// Import file (GeoJSON or GPX)
+function importFile(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+
+  const fileName = file.name.toLowerCase();
+  if (fileName.endsWith('.gpx')) {
+    importGPX(file);
+  } else {
+    importGeoJSON(file);
+  }
+  
+  // Reset input
+  input.value = '';
+}
+
+// GPX Import
+function importGPX(file: File) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const content = e.target?.result as string;
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(content, 'text/xml');
+      
+      let placesImported = 0;
+      let routesImported = 0;
+
+      // Import waypoints as places
+      const waypoints = xmlDoc.getElementsByTagName('wpt');
+      for (let i = 0; i < waypoints.length; i++) {
+        const wpt = waypoints[i];
+        const lat = parseFloat(wpt.getAttribute('lat') || '0');
+        const lon = parseFloat(wpt.getAttribute('lon') || '0');
+        const nameEl = wpt.getElementsByTagName('name')[0];
+        const name = nameEl?.textContent || 'Imported Place';
+        
+        savedPlaces.value.push({
+          name,
+          lon,
+          lat,
+          icon: '📍',
+          color: customization.value.placeMarkerColor,
+        });
+        addMarker(lon, lat, name, customization.value.placeMarkerColor);
+        placesImported++;
+      }
+
+      // Import tracks as routes
+      const tracks = xmlDoc.getElementsByTagName('trk');
+      for (let i = 0; i < tracks.length; i++) {
+        const trk = tracks[i];
+        const nameEl = trk.getElementsByTagName('name')[0];
+        const name = nameEl?.textContent || 'Imported Route';
+        
+        const trksegs = trk.getElementsByTagName('trkseg');
+        for (let j = 0; j < trksegs.length; j++) {
+          const trkseg = trksegs[j];
+          const trkpts = trkseg.getElementsByTagName('trkpt');
+          const coordinates: number[][] = [];
+          
+          for (let k = 0; k < trkpts.length; k++) {
+            const trkpt = trkpts[k];
+            const lat = parseFloat(trkpt.getAttribute('lat') || '0');
+            const lon = parseFloat(trkpt.getAttribute('lon') || '0');
+            coordinates.push([lon, lat]);
+          }
+          
+          if (coordinates.length > 0) {
+            const newRoute: SavedRoute = {
+              id: generateId(),
+              name,
+              origin: { name: 'Start', address: '', lon: coordinates[0][0], lat: coordinates[0][1] },
+              destination: { name: 'End', address: '', lon: coordinates[coordinates.length - 1][0], lat: coordinates[coordinates.length - 1][1] },
+              stops: [],
+              distance: '',
+              duration: '',
+              coordinates: coordinates,
+            };
+            savedRoutes.value.push(newRoute);
+            
+            // Draw route on map
+            const projectedCoords = coordinates.map(coord => fromLonLat(coord));
+            const routeFeature = new Feature({
+              geometry: new LineString(projectedCoords),
+              type: 'route',
+            });
+            routeFeature.setStyle(
+              new Style({
+                stroke: new Stroke({
+                  color: customization.value.routeColor,
+                  width: 4,
+                }),
+              })
+            );
+            routeSource?.addFeature(routeFeature);
+            routesImported++;
+          }
+        }
+      }
+
+      saveToLocalStorage();
+
+      // Fit map to imported features
+      if (map && routesImported > 0) {
+        if (routeSource && routeSource.getFeatures().length > 0) {
+          const extent = routeSource.getExtent();
+          if (extent && extent[0] !== Infinity) {
+            map.getView().fit(extent, { padding: [50, 50, 50, 50], duration: 500 });
+          }
+        }
+      } else if (map && placesImported > 0) {
+        if (markersSource && markersSource.getFeatures().length > 0) {
+          const extent = markersSource.getExtent();
+          if (extent && extent[0] !== Infinity) {
+            map.getView().fit(extent, { padding: [50, 50, 50, 50], duration: 500 });
+          }
+        }
+      }
+      
+      showStatus(`Imported ${placesImported} places and ${routesImported} routes from GPX`, 'success');
+    } catch (error) {
+      console.error('Failed to import GPX:', error);
+      showStatus('Failed to import GPX file', 'error');
+    }
+  };
+  reader.readAsText(file);
 }
 
 // PDF Map Export
@@ -2264,9 +2501,16 @@ async function exportPdfMap() {
 }
 
 // GeoJSON Import
-function importGeoJSON(event: Event) {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
+function importGeoJSON(eventOrFile: Event | File) {
+  let file: File | undefined;
+  
+  if (eventOrFile instanceof File) {
+    file = eventOrFile;
+  } else {
+    const input = (eventOrFile.target as HTMLInputElement);
+    file = input.files?.[0];
+  }
+  
   if (!file) return;
 
   const reader = new FileReader();
@@ -2342,19 +2586,21 @@ function importGeoJSON(event: Event) {
 
       saveToLocalStorage();
 
-      // Fit map to imported features
-      if (map) {
-        const allSources = [markersSource, routeSource].filter(Boolean) as VectorSource[];
-        let hasFeatures = false;
-        
-        for (const source of allSources) {
-          if (source.getFeatures().length > 0) {
-            hasFeatures = true;
-            const extent = source.getExtent();
-            if (extent && extent[0] !== Infinity) {
-              map.getView().fit(extent, { padding: [50, 50, 50, 50], duration: 500 });
-              break;
-            }
+      // Fit map to imported features - combine all extents
+      if (map && routesImported > 0) {
+        // If routes were imported, fit to the route source extent
+        if (routeSource && routeSource.getFeatures().length > 0) {
+          const extent = routeSource.getExtent();
+          if (extent && extent[0] !== Infinity) {
+            map.getView().fit(extent, { padding: [50, 50, 50, 50], duration: 500 });
+          }
+        }
+      } else if (map && placesImported > 0) {
+        // Otherwise fit to markers
+        if (markersSource && markersSource.getFeatures().length > 0) {
+          const extent = markersSource.getExtent();
+          if (extent && extent[0] !== Infinity) {
+            map.getView().fit(extent, { padding: [50, 50, 50, 50], duration: 500 });
           }
         }
       }
@@ -2366,9 +2612,6 @@ function importGeoJSON(event: Event) {
     }
   };
   reader.readAsText(file);
-
-  // Reset input
-  input.value = '';
 }
 
 // Handle map click
