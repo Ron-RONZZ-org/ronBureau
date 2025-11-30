@@ -13,20 +13,12 @@
           <div v-if="vectorTilesAvailable || (useVectorTiles && vectorTileProvider)" class="vector-tiles-status">
             <!-- MapTiler Style Selector (visible when MapTiler key available) -->
             <div v-if="vectorTilesAvailable" class="sidebar-style-selector">
-              <div v-if="useVectorTiles">
-              <label for="maptiler-style">Style:</label>
-              <select id="maptiler-style" v-model="maptilerStyle" @change="switchMapTilerStyle" class="select select-sm">
+              <label for="maptiler-style">Map Style:</label>
+              <select id="maptiler-style" v-model="maptilerStyle" @change="onMapStyleChange" class="select select-sm">
                 <option v-for="style in maptilerStyles" :key="style.id" :value="style.id">
                   {{ style.name }}
                 </option>
               </select>
-            </div>
-              <div style="display:flex; gap:0.5rem; align-items:center; margin-top:0.25rem;">
-                <button class="btn btn-sm" @click="useVectorTiles = !useVectorTiles; toggleVectorTiles()">
-                  {{ useVectorTiles ? 'Use Raster' : 'Use Vector' }}
-                </button>
-                <p v-if="!useVectorTiles" class="hint-text" style="margin: 0;">Enable Vector Tiles for more styles</p>
-              </div>
             </div>
           </div>
 
@@ -2311,6 +2303,189 @@ function importGPX(file: File) {
   reader.readAsText(file);
 }
 
+// Shared PDF Export Helper Functions
+
+// Calculate combined extent from features for auto-scale
+function calculateExportExtent(): number[] | null {
+  if (!map || !markersSource || !routeSource) return null;
+  
+  const extents: number[][] = [];
+  
+  // Collect extents from places if showing places
+  if (pdfOptions.value.exportContent !== 'routes') {
+    const placeFeatures = markersSource.getFeatures().filter(f => f.get('type') === 'place');
+    if (placeFeatures.length > 0) {
+      placeFeatures.forEach(f => {
+        const geom = f.getGeometry();
+        if (geom) extents.push(geom.getExtent());
+      });
+    }
+  }
+  
+  // Collect extents from routes if showing routes
+  if (pdfOptions.value.exportContent !== 'places') {
+    const routeFeatures = routeSource.getFeatures();
+    if (routeFeatures.length > 0) {
+      routeFeatures.forEach(f => {
+        const geom = f.getGeometry();
+        if (geom) extents.push(geom.getExtent());
+      });
+    }
+  }
+  
+  if (extents.length === 0) return null;
+  
+  // Calculate combined extent
+  const combinedExtent = extents[0].slice();
+  for (let i = 1; i < extents.length; i++) {
+    combinedExtent[0] = Math.min(combinedExtent[0], extents[i][0]);
+    combinedExtent[1] = Math.min(combinedExtent[1], extents[i][1]);
+    combinedExtent[2] = Math.max(combinedExtent[2], extents[i][2]);
+    combinedExtent[3] = Math.max(combinedExtent[3], extents[i][3]);
+  }
+  
+  // For single points, add padding to create a reasonable extent
+  const extentWidth = combinedExtent[2] - combinedExtent[0];
+  const extentHeight = combinedExtent[3] - combinedExtent[1];
+  
+  if (extentWidth < 1000 || extentHeight < 1000) {
+    const minSize = 5000;
+    const expandX = Math.max(0, (minSize - extentWidth) / 2);
+    const expandY = Math.max(0, (minSize - extentHeight) / 2);
+    combinedExtent[0] -= expandX;
+    combinedExtent[1] -= expandY;
+    combinedExtent[2] += expandX;
+    combinedExtent[3] += expandY;
+  }
+  
+  return combinedExtent;
+}
+
+// Apply auto-scale to map view
+async function applyAutoScale(): Promise<void> {
+  if (!map || pdfOptions.value.scale !== 'auto') return;
+  
+  const extent = calculateExportExtent();
+  if (extent) {
+    map.getView().fit(extent, { padding: [80, 80, 80, 80], maxZoom: 18 });
+    await new Promise(resolve => setTimeout(resolve, 500));
+    map.renderSync();
+    await new Promise(resolve => setTimeout(resolve, 300));
+  } else {
+    showStatus('Warning: No places or routes to export', 'error');
+  }
+}
+
+// Add PDF decorations (north pointer, scale bar, legend, credits)
+function addPdfDecorations(
+  pdf: InstanceType<typeof jsPDF>,
+  mapLeft: number,
+  mapTop: number,
+  mapWidth: number,
+  mapHeight: number,
+  pageWidth: number,
+  pageHeight: number,
+  margin: number
+): void {
+  // Add north pointer
+  if (pdfOptions.value.showNorthPointer) {
+    const npX = mapLeft + mapWidth - 10;
+    const npY = mapTop + 10;
+    pdf.setFillColor(255, 255, 255);
+    pdf.circle(npX, npY, 5, 'F');
+    pdf.setDrawColor(0, 0, 0);
+    pdf.circle(npX, npY, 5, 'S');
+    pdf.setFontSize(8);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text('N', npX, npY + 1, { align: 'center' });
+    pdf.setLineWidth(0.5);
+    pdf.line(npX, npY - 7, npX, npY - 3);
+    pdf.line(npX - 2, npY - 5, npX, npY - 7);
+    pdf.line(npX + 2, npY - 5, npX, npY - 7);
+  }
+  
+  // Add scale bar
+  if (pdfOptions.value.showScaleBar && map) {
+    const view = map.getView();
+    const resolution = view.getResolution();
+    if (resolution && resolution > 0) {
+      const center = view.getCenter();
+      if (center) {
+        const centerLonLat = toLonLat(center);
+        const pixelDistance = 100;
+        const offsetPoint = toLonLat([center[0] + resolution * pixelDistance, center[1]]);
+        const distanceFor100px = getDistance(centerLonLat, offsetPoint);
+        
+        const niceScaleValues = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000];
+        let selectedScale = niceScaleValues[0];
+        
+        for (const niceValue of niceScaleValues) {
+          const pixelsNeeded = (niceValue / distanceFor100px) * pixelDistance;
+          if (pixelsNeeded >= 50 && pixelsNeeded <= 200) {
+            selectedScale = niceValue;
+            break;
+          }
+        }
+        
+        const scaleLabel = selectedScale >= 1000 
+          ? `${selectedScale / 1000} km` 
+          : `${selectedScale} m`;
+        
+        const sbX = mapLeft + 5;
+        const sbY = mapTop + mapHeight - 5;
+        const sbWidth = 30;
+        
+        pdf.setFillColor(255, 255, 255);
+        pdf.rect(sbX - 2, sbY - 5, sbWidth + 4, 8, 'F');
+        pdf.setDrawColor(0, 0, 0);
+        pdf.setLineWidth(0.5);
+        pdf.line(sbX, sbY, sbX + sbWidth, sbY);
+        pdf.line(sbX, sbY - 2, sbX, sbY);
+        pdf.line(sbX + sbWidth, sbY - 2, sbX + sbWidth, sbY);
+        pdf.setFontSize(7);
+        pdf.setFont('helvetica', 'normal');
+        pdf.text(scaleLabel, sbX + sbWidth / 2, sbY - 2, { align: 'center' });
+      }
+    }
+  }
+  
+  // Add legend
+  if (pdfOptions.value.showLegend) {
+    const legendHeight = pdfOptions.value.pageSize === 'a3' ? 25 : 20;
+    const legendY = pageHeight - margin - legendHeight + 5;
+    pdf.setFontSize(pdfOptions.value.pageSize === 'a3' ? 12 : 10);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text('Legend:', margin, legendY);
+    
+    let legendX = margin + 25;
+    pdf.setFontSize(pdfOptions.value.pageSize === 'a3' ? 10 : 8);
+    pdf.setFont('helvetica', 'normal');
+    
+    const showPlaces = (pdfOptions.value.exportContent === 'both' || pdfOptions.value.exportContent === 'places') && savedPlaces.value.length > 0;
+    const showRoutes = (pdfOptions.value.exportContent === 'both' || pdfOptions.value.exportContent === 'routes') && (savedRoutes.value.length > 0 || currentRouteCoordinates.value.length > 0);
+    
+    if (showPlaces) {
+      pdf.setFillColor(239, 68, 68);
+      pdf.circle(legendX, legendY - 1, 2, 'F');
+      pdf.text('Places', legendX + 5, legendY);
+      legendX += 35;
+    }
+    
+    if (showRoutes) {
+      pdf.setDrawColor(34, 197, 94);
+      pdf.setLineWidth(1);
+      pdf.line(legendX, legendY - 1, legendX + 10, legendY - 1);
+      pdf.text('Routes', legendX + 15, legendY);
+    }
+  }
+  
+  // Add credits
+  pdf.setFontSize(8);
+  pdf.setFont('helvetica', 'normal');
+  pdf.text(`Generated with ronBureau by ${auth.user?.userId ?? 'unknown user'} on ${new Date().toLocaleDateString()}`, pageWidth - margin, pageHeight - margin, { align: 'right' });
+  pdf.text('Map data © OpenStreetMap contributors — https://osmfoundation.org/Licence', margin, pageHeight - margin, { align: 'left' });
+}
+
 // SVG Vector Export Helper
 function generateSvgFromFeatures(width: number, height: number): SVGSVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -2393,6 +2568,7 @@ async function exportPdfMap() {
   if (pdfOptions.value.vectorExport) {
     // If MapTiler key is available, ensure MapTiler vector tiles are enabled
     await ensureMapTilerForVectorExport();
+    await exportVectorPdfMap();
     return;
   }
   
@@ -2604,8 +2780,10 @@ async function exportPdfMap() {
     const mapLeft = margin + (availableWidth - mapWidth) / 2;
     
     // Add map image with proper aspect ratio
-    const imgData = exportCanvas.toDataURL('image/png', 1.0);
-    pdf.addImage(imgData, 'PNG', mapLeft, mapTop, mapWidth, mapHeight);
+    // Use JPEG format with 0.85 quality for basemap images - reduces file size significantly
+    // while maintaining good visual quality for map tiles
+    const imgData = exportCanvas.toDataURL('image/jpeg', 0.85);
+    pdf.addImage(imgData, 'JPEG', mapLeft, mapTop, mapWidth, mapHeight, undefined, 'FAST');
     
     // Add north pointer
     if (pdfOptions.value.showNorthPointer) {
@@ -2833,7 +3011,8 @@ async function exportVectorPdfMap() {
     if (pdfOptions.value.includeBasemap) {
       const mapCanvas = map.getViewport().querySelector('canvas') as HTMLCanvasElement;
       if (mapCanvas) {
-        const imgData = mapCanvas.toDataURL('image/png');
+        // Use JPEG format with 0.85 quality for smaller file size
+        const imgData = mapCanvas.toDataURL('image/jpeg', 0.85);
         const image = document.createElementNS('http://www.w3.org/2000/svg', 'image');
         image.setAttribute('href', imgData);
         image.setAttribute('x', '0');
@@ -2926,106 +3105,8 @@ async function exportVectorPdfMap() {
     });
     document.body.removeChild(svg);
     
-    // Add north pointer
-    if (pdfOptions.value.showNorthPointer) {
-      const npX = mapLeft + pdfMapWidth - 10;
-      const npY = mapTop + 10;
-      pdf.setFillColor(255, 255, 255);
-      pdf.circle(npX, npY, 5, 'F');
-      pdf.setDrawColor(0, 0, 0);
-      pdf.circle(npX, npY, 5, 'S');
-      pdf.setFontSize(8);
-      pdf.setFont('helvetica', 'bold');
-      pdf.text('N', npX, npY + 1, { align: 'center' });
-      pdf.setLineWidth(0.5);
-      pdf.line(npX, npY - 7, npX, npY - 3);
-      pdf.line(npX - 2, npY - 5, npX, npY - 7);
-      pdf.line(npX + 2, npY - 5, npX, npY - 7);
-    }
-    
-    // Add scale bar (simplified for vector export)
-    if (pdfOptions.value.showScaleBar) {
-      const view = map.getView();
-      const resolution = view.getResolution();
-      if (resolution && resolution > 0) {
-        const center = view.getCenter();
-        if (center) {
-          const centerLonLat = toLonLat(center);
-          const pixelDistance = 100;
-          const offsetPoint = toLonLat([center[0] + resolution * pixelDistance, center[1]]);
-          const distanceFor100px = getDistance(centerLonLat, offsetPoint);
-          
-          const niceScaleValues = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000];
-          let selectedScale = niceScaleValues[0];
-          
-          for (const niceValue of niceScaleValues) {
-            const pixelsNeeded = (niceValue / distanceFor100px) * pixelDistance;
-            if (pixelsNeeded >= 50 && pixelsNeeded <= 200) {
-              selectedScale = niceValue;
-              break;
-            }
-          }
-          
-          let scaleLabel: string;
-          if (selectedScale >= 1000) {
-            scaleLabel = `${selectedScale / 1000} km`;
-          } else {
-            scaleLabel = `${selectedScale} m`;
-          }
-          
-          const sbX = mapLeft + 5;
-          const sbY = mapTop + pdfMapHeight - 5;
-          const sbWidth = 30;
-          
-          pdf.setFillColor(255, 255, 255);
-          pdf.rect(sbX - 2, sbY - 5, sbWidth + 4, 8, 'F');
-          pdf.setDrawColor(0, 0, 0);
-          pdf.setLineWidth(0.5);
-          pdf.line(sbX, sbY, sbX + sbWidth, sbY);
-          pdf.line(sbX, sbY - 2, sbX, sbY);
-          pdf.line(sbX + sbWidth, sbY - 2, sbX + sbWidth, sbY);
-          pdf.setFontSize(7);
-          pdf.setFont('helvetica', 'normal');
-          pdf.text(scaleLabel, sbX + sbWidth / 2, sbY - 2, { align: 'center' });
-        }
-      }
-    }
-    
-    // Add legend
-    if (pdfOptions.value.showLegend) {
-      const legendY = pageHeight - margin - legendHeight + 5;
-      pdf.setFontSize(pdfOptions.value.pageSize === 'a3' ? 12 : 10);
-      pdf.setFont('helvetica', 'bold');
-      pdf.text('Legend:', margin, legendY);
-      
-      let legendX = margin + 25;
-      pdf.setFontSize(pdfOptions.value.pageSize === 'a3' ? 10 : 8);
-      pdf.setFont('helvetica', 'normal');
-      
-      const showPlaces = (pdfOptions.value.exportContent === 'both' || pdfOptions.value.exportContent === 'places') && savedPlaces.value.length > 0;
-      const showRoutes = (pdfOptions.value.exportContent === 'both' || pdfOptions.value.exportContent === 'routes') && (savedRoutes.value.length > 0 || currentRouteCoordinates.value.length > 0);
-      
-      if (showPlaces) {
-        pdf.setFillColor(239, 68, 68);
-        pdf.circle(legendX, legendY - 1, 2, 'F');
-        pdf.text('Places', legendX + 5, legendY);
-        legendX += 35;
-      }
-      
-      if (showRoutes) {
-        pdf.setDrawColor(34, 197, 94);
-        pdf.setLineWidth(1);
-        pdf.line(legendX, legendY - 1, legendX + 10, legendY - 1);
-        pdf.text('Routes', legendX + 15, legendY);
-      }
-    }
-    
-    // Add credits
-    pdf.setFontSize(8);
-    pdf.setFont('helvetica', 'normal');
-    pdf.text(`Generated with ronBureau by ${auth.user?.userId ?? 'unknown user'} on ${new Date().toLocaleDateString()}`, pageWidth - margin, pageHeight - margin, { align: 'right' });
-    const creditsText = 'Map data © OpenStreetMap contributors — https://osmfoundation.org/Licence';
-    pdf.text(creditsText, margin, pageHeight - margin, { align: 'left' });
+    // Add decorations (north pointer, scale bar, legend, credits)
+    addPdfDecorations(pdf, mapLeft, mapTop, pdfMapWidth, pdfMapHeight, pageWidth, pageHeight, margin);
     
     // Restore view if modified
     if (pdfOptions.value.scale === 'auto' && originalCenter && originalZoom) {
@@ -3225,6 +3306,24 @@ async function switchMapTilerStyle() {
   }
 }
 
+// Handle map style change - automatically enables vector tiles when a style is selected
+async function onMapStyleChange() {
+  // Always use vector tiles when MapTiler style is selected
+  if (!useVectorTiles.value) {
+    useVectorTiles.value = true;
+  }
+  
+  // If already using vector tiles, just switch the style
+  if (map) {
+    const layers = map.getLayers();
+    if (vectorTileLayer) {
+      layers.remove(vectorTileLayer);
+      vectorTileLayer = null;
+    }
+    await toggleVectorTiles();
+  }
+}
+
 // Toggle between raster and vector tiles
 async function toggleVectorTiles() {
   if (!map) return;
@@ -3338,6 +3437,12 @@ onMounted(() => {
     
     // Add click handler
     map.on('click', handleMapClick);
+    
+    // Auto-enable vector tiles if MapTiler API key is available
+    if (vectorTilesAvailable.value) {
+      useVectorTiles.value = true;
+      toggleVectorTiles();
+    }
   }
 });
 
@@ -3764,7 +3869,7 @@ onUnmounted(() => {
 }
 
 .vector-tiles-status {
-  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+  background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   padding: 0.75rem;
