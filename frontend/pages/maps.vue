@@ -2389,7 +2389,7 @@ function addPdfDecorations(
 
         // background for scale area
         pdf.setFillColor(255, 255, 255);
-        pdf.rect(sbX - 2, sbY - 5, sbWidth + 4, 8, 'F');
+        pdf.rect(sbX - 2, sbY - 8, sbWidth + 4, 12, 'F');
 
         // draw two-part (black / white) scale bar above the baseline
         const half = Math.round(sbWidth / 2);
@@ -2505,18 +2505,42 @@ function addPlaceToSvg(svg: SVGSVGElement, lon: number, lat: number, name: strin
   svg.appendChild(circle);
   
   // Add text label
+  // Create text label (black text)
+  const fontSize = Math.max(10, Math.round(radius * 0.9)); // reasonable size based on marker radius
+  const textX = pixel[0];
+  const textY = pixel[1] - radius - 8;
+
   const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-  text.setAttribute('x', pixel[0].toString());
-  text.setAttribute('y', (pixel[1] - radius - 8).toString());
+  text.setAttribute('x', textX.toString());
+  text.setAttribute('y', textY.toString());
   text.setAttribute('text-anchor', 'middle');
   text.setAttribute('font-family', 'Arial, sans-serif');
-  text.setAttribute('font-size', '14');
+  text.setAttribute('font-size', fontSize.toString());
   text.setAttribute('font-weight', 'bold');
-  text.setAttribute('fill', '#1e293b');
-  text.setAttribute('stroke', '#ffffff');
-  text.setAttribute('stroke-width', '3');
-  text.setAttribute('paint-order', 'stroke');
+  text.setAttribute('fill', '#000000'); // black text
+  text.style.pointerEvents = 'none';
   text.textContent = name;
+
+  // Approximate text width (avoid relying on getBBox when SVG not yet in DOM)
+  const approxCharWidth = fontSize * 0.6;
+  const textWidth = Math.max(20, name.length * approxCharWidth);
+  const pad = 3;
+
+  // White background rect behind text
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('x', (textX - textWidth / 2 - pad).toString());
+  // textY is baseline -> top ~ textY - fontSize
+  rect.setAttribute('y', (textY - fontSize - pad).toString());
+  rect.setAttribute('width', (textWidth + pad * 2).toString());
+  rect.setAttribute('height', (fontSize + pad * 2).toString());
+  rect.setAttribute('rx', '4');
+  rect.setAttribute('ry', '4');
+  rect.setAttribute('fill', '#ffffff'); // white background
+  rect.setAttribute('stroke', '#e5e7eb'); // light border
+  rect.setAttribute('stroke-width', '0.5');
+  rect.style.pointerEvents = 'none';
+
+  svg.appendChild(rect);
   svg.appendChild(text);
 }
 
