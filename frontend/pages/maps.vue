@@ -2577,74 +2577,8 @@ async function exportPdfMap() {
     const originalCenter = map.getView().getCenter();
     const originalZoom = map.getView().getZoom();
     
-    // If autoscale is enabled, fit the view to all visible places and routes
-    if (pdfOptions.value.scale === 'auto') {
-      const extents: number[][] = [];
-      
-      // Collect extents from places if showing places
-      if (pdfOptions.value.exportContent !== 'routes' && markersSource) {
-        const placeFeatures = markersSource.getFeatures().filter(f => f.get('type') === 'place');
-        if (placeFeatures.length > 0) {
-          placeFeatures.forEach(f => {
-            const geom = f.getGeometry();
-            if (geom) {
-              extents.push(geom.getExtent());
-            }
-          });
-        }
-      }
-      
-      // Collect extents from routes if showing routes
-      if (pdfOptions.value.exportContent !== 'places' && routeSource) {
-        const routeFeatures = routeSource.getFeatures();
-        if (routeFeatures.length > 0) {
-          routeFeatures.forEach(f => {
-            const geom = f.getGeometry();
-            if (geom) {
-              extents.push(geom.getExtent());
-            }
-          });
-        }
-      }
-      
-      // Calculate combined extent and fit view
-      if (extents.length > 0) {
-        let combinedExtent = extents[0].slice();
-        for (let i = 1; i < extents.length; i++) {
-          combinedExtent[0] = Math.min(combinedExtent[0], extents[i][0]);
-          combinedExtent[1] = Math.min(combinedExtent[1], extents[i][1]);
-          combinedExtent[2] = Math.max(combinedExtent[2], extents[i][2]);
-          combinedExtent[3] = Math.max(combinedExtent[3], extents[i][3]);
-        }
-        
-        // For single points, add padding to create a reasonable extent
-        const extentWidth = combinedExtent[2] - combinedExtent[0];
-        const extentHeight = combinedExtent[3] - combinedExtent[1];
-        
-        // If extent is too small (single point or very close points), expand it
-        if (extentWidth < 1000 || extentHeight < 1000) {
-          const minSize = 5000; // Minimum extent size in meters (roughly)
-          const expandX = Math.max(0, (minSize - extentWidth) / 2);
-          const expandY = Math.max(0, (minSize - extentHeight) / 2);
-          combinedExtent[0] -= expandX;
-          combinedExtent[1] -= expandY;
-          combinedExtent[2] += expandX;
-          combinedExtent[3] += expandY;
-        }
-        
-        map.getView().fit(combinedExtent, { padding: [80, 80, 80, 80], maxZoom: 18 });
-        
-        // Wait for map to render and tiles to load
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Force a map render
-        map.renderSync();
-        await new Promise(resolve => setTimeout(resolve, 300));
-      } else {
-        // No features to show - keep current view but warn user
-        showStatus('Warning: No places or routes to export', 'error');
-      }
-    }
+    // Apply auto-scale if enabled
+    await applyAutoScale();
     
     // Save current location marker features before clearing
     const savedLocationFeatures: Feature[] = [];
@@ -2932,58 +2866,8 @@ async function exportVectorPdfMap() {
     const originalCenter = map.getView().getCenter();
     const originalZoom = map.getView().getZoom();
     
-    // Auto-scale logic (same as raster export)
-    if (pdfOptions.value.scale === 'auto') {
-      const extents: number[][] = [];
-      
-      if (pdfOptions.value.exportContent !== 'routes' && markersSource) {
-        const placeFeatures = markersSource.getFeatures().filter(f => f.get('type') === 'place');
-        if (placeFeatures.length > 0) {
-          placeFeatures.forEach(f => {
-            const geom = f.getGeometry();
-            if (geom) extents.push(geom.getExtent());
-          });
-        }
-      }
-      
-      if (pdfOptions.value.exportContent !== 'places' && routeSource) {
-        const routeFeatures = routeSource.getFeatures();
-        if (routeFeatures.length > 0) {
-          routeFeatures.forEach(f => {
-            const geom = f.getGeometry();
-            if (geom) extents.push(geom.getExtent());
-          });
-        }
-      }
-      
-      if (extents.length > 0) {
-        let combinedExtent = extents[0].slice();
-        for (let i = 1; i < extents.length; i++) {
-          combinedExtent[0] = Math.min(combinedExtent[0], extents[i][0]);
-          combinedExtent[1] = Math.min(combinedExtent[1], extents[i][1]);
-          combinedExtent[2] = Math.max(combinedExtent[2], extents[i][2]);
-          combinedExtent[3] = Math.max(combinedExtent[3], extents[i][3]);
-        }
-        
-        const extentWidth = combinedExtent[2] - combinedExtent[0];
-        const extentHeight = combinedExtent[3] - combinedExtent[1];
-        
-        if (extentWidth < 1000 || extentHeight < 1000) {
-          const minSize = 5000;
-          const expandX = Math.max(0, (minSize - extentWidth) / 2);
-          const expandY = Math.max(0, (minSize - extentHeight) / 2);
-          combinedExtent[0] -= expandX;
-          combinedExtent[1] -= expandY;
-          combinedExtent[2] += expandX;
-          combinedExtent[3] += expandY;
-        }
-        
-        map.getView().fit(combinedExtent, { padding: [80, 80, 80, 80], maxZoom: 18 });
-        await new Promise(resolve => setTimeout(resolve, 500));
-        map.renderSync();
-        await new Promise(resolve => setTimeout(resolve, 300));
-      }
-    }
+    // Apply auto-scale if enabled
+    await applyAutoScale();
     
     // Get map size
     const mapSize = map.getSize();
@@ -3289,20 +3173,6 @@ function handleMapClick(event: { coordinate: number[] }) {
       saveToLocalStorage();
       showStatus('Place added!', 'success');
     });
-  }
-}
-
-// Switch MapTiler style
-async function switchMapTilerStyle() {
-  if (vectorTileProvider.value === 'maptiler' && useVectorTiles.value && map) {
-    // Remove existing vector tile layer
-    const layers = map.getLayers();
-    if (vectorTileLayer) {
-      layers.remove(vectorTileLayer);
-      vectorTileLayer = null;
-    }
-    // Reload vector tiles with new style
-    await toggleVectorTiles();
   }
 }
 
