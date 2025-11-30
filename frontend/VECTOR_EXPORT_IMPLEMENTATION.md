@@ -1,46 +1,40 @@
-# Vector Tiles & SVG→PDF Export Implementation
+# Map Style Selector & Unified PDF Export Implementation
 
 ## 📋 Overview
 
-This implementation adds **FULL vector tile basemap support** (with MapTiler or OpenFreeMap) and **SVG-based vector PDF export**, providing professional-quality map exports with crisp, scalable text, routes, and complete basemap rendering.
+This implementation provides a **unified map style selector** supporting OSM (default), OpenFreeMap, and MapTiler, along with a **unified PDF export** that renders places and routes as SVG vectors with the basemap as a raster image.
 
 ## 🎯 Key Features Implemented
 
-### 1. Complete Vector Basemap Integration
-- **MapTiler Integration (Premium)**: Professional vector tiles with full styling
-  - Roads, buildings, labels, POIs, terrain
-  - Multiple style options (basic, streets, outdoor, satellite)
-  - 100,000 tile loads/month FREE tier
-  - **Auto-enabled** when API key is configured
-- **OpenFreeMap (Free Fallback)**: No API key required
-  - Automatic fallback if MapTiler key not configured
-  - Liberty style with complete OSM coverage
-  - Unlimited, free usage
-- **Smart Provider Selection**: Automatically chooses best available option
-- **Style Selector**: Pure map style selector in sidebar (replaces raster/vector toggle)
+### 1. Unified Map Style Selector
+- **OSM Standard (Default)**: Classic OpenStreetMap raster tiles - works without any API key
+- **OpenFreeMap Liberty**: Free vector tiles, no API key required
+- **MapTiler Styles**: Premium vector tiles with multiple style options (requires API key)
+  - Basic, Streets, Topo, DataViz, Winter, Satellite, Outdoor
 
-### 2. Vector Tiles Integration
-- **Complete Basemap**: Not just overlays — full vector rendering of all map elements
-- **Map Style Selector**: UI dropdown to switch between MapTiler styles
-- **Dynamic Layer Switching**: Seamless switching without page reload
-- **MVT Format**: Uses Mapbox Vector Tiles with OpenLayers + ol-mapbox-style
+### 2. Tile Provider Integration  
+- **OSM (Default)**: Standard raster tiles from OpenStreetMap
+- **OpenFreeMap**: Free vector tiles using Liberty style
+- **MapTiler**: Premium vector tiles with multiple style options
+- **Automatic Fallback**: If MapTiler key is missing, falls back to OSM
 
-### 3. SVG-Based Vector PDF Export
-- **Pure Vector Output**: Places and routes are exported as true vector graphics (SVG → PDF)
-- **Crisp Text**: Labels remain sharp at any zoom level or print size
-- **Hybrid Mode**: Optional basemap inclusion (raster background + vector overlay)
-- **Full Feature Support**: All existing PDF features (legend, scale bar, north pointer) preserved
-- **Optimized File Size**: JPEG compression (0.85 quality) for basemap images
+### 3. Unified PDF Export
+- **Basemap as Raster**: Map canvas (regardless of source) exported as JPEG (0.85 quality)
+- **Places as SVG**: All saved places rendered as crisp vector graphics
+- **Routes as SVG**: All routes rendered as crisp vector paths
+- **Direction Markers**: Origin (A), destination (B), and stops rendered as SVG
+- **Full Decorations**: Title, legend, scale bar, north pointer, credits
 
-### 4. Enhanced PDF Export Options
-- **Vector Export Toggle**: Checkbox to enable SVG→PDF vector export
-- **Basemap Control**: Option to include/exclude basemap in vector exports
-- **Quality Settings**: Same scale, page size, and content options as before
-- **Unified Export Logic**: Shared helper functions reduce code duplication
+### 4. Helper Functions
+- `calculateExportExtent()`: Calculate combined extent from features for auto-scale
+- `applyAutoScale()`: Apply auto-scale to map view
+- `addPdfDecorations()`: Add north pointer, scale bar, legend, and credits
+- `addPlaceToSvg()`: Render a place marker as SVG
+- `addRouteToSvg()`: Render a route as SVG path
 
 ## 🔧 Technical Implementation
 
-### Dependencies Added
+### Dependencies
 ```json
 {
   "svg2pdf.js": "^2.2.4",
