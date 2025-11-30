@@ -668,7 +668,7 @@ import GeoJSON from 'ol/format/GeoJSON';
 import { getDistance } from 'ol/sphere';
 import { jsPDF } from 'jspdf';
 import { svg2pdf } from 'svg2pdf.js';
-import { apply as applyStyle } from 'ol-mapbox-style';
+import { applyStyle } from 'ol-mapbox-style';
 
 const config = useRuntimeConfig();
 
