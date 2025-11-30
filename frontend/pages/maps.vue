@@ -10,11 +10,11 @@
             </button>
           </div>
           
-            <!-- MapTiler Style Selector (visible when MapTiler key available) -->
+            <!-- Map Style Selector (OSM default, OpenFreeMap, MapTiler) -->
             <div class="sidebar-style-selector">
-              <label for="maptiler-style">Map Style:</label>
-              <select id="maptiler-style" v-model="maptilerStyle" @change="onMapStyleChange" class="select select-sm">
-                <option v-for="style in maptilerStyles" :key="style.id" :value="style.id">
+              <label for="map-style">Map Style:</label>
+              <select id="map-style" v-model="selectedMapStyle" @change="onMapStyleChange" class="select select-sm">
+                <option v-for="style in mapStyles" :key="style.id" :value="style.id">
                   {{ style.name }}
                 </option>
               </select>
@@ -447,7 +447,6 @@
               <label><input type="checkbox" v-model="pdfOptions.showScaleBar" /> Show Scale Bar</label>
               <label><input type="checkbox" v-model="pdfOptions.showNorthPointer" /> Show North Pointer</label>
             </div>
-            <div v-if="pdfOptions.vectorExport" class="checkbox-group" style="margin-left: 1.5rem; padding-left: 1rem; border-left: 2px solid #e2e8f0;"></div>
             <div class="modal-buttons">
               <button class="btn btn-outline" @click="showPdfExportModal = false">Cancel</button>
               <button class="btn btn-primary" @click="exportPdfMap">Export PDF</button>
@@ -782,62 +781,28 @@ const pdfOptions = ref({
   showLegend: true,
   showScaleBar: true,
   showNorthPointer: true,
-  includeBasemap: true, // New: include basemap in vector export (as raster)
 });
 
 // Vector tiles state
 const useVectorTiles = ref(false);
-const vectorTileProvider = ref<'maptiler' | 'openfreemap' | null>(null);
-const maptilerStyle = ref<string>('basic-v2'); // Selected MapTiler style
+const tileProvider = ref<'osm' | 'openfreemap' | 'maptiler' | null>(null);
+const selectedMapStyle = ref<string>('osm'); // Selected map style (default to OSM)
 let vectorTileLayer: VectorTileLayer | null = null;
 
-// Available MapTiler styles / tilesets (extracted from temp.html)
-const maptilerStyles = [
-    { id: 'basic-v2', name: '🗺️ Basic', description: 'Simple clean style (MapTiler built-in)' },
-  { id: 'streets-v2', name: '🛣️ Streets', description: 'Detailed streets (MapTiler built-in)' },
-  { id: 'topo-v2', name: '📐 Topo', description: 'Topographic map (MapTiler built-in)' },
-  { id: 'dataviz', name: '📊 DataViz', description: 'Data visualization (MapTiler built-in)' },
-  { id: 'winter-v2', name: '❄️ Winter', description: 'Winter theme (MapTiler built-in)' },
-  { id: 'buildings', name: 'Buildings', description: 'z12-15 | vector' },
-  { id: 'contours-v2', name: 'Contours v2', description: 'z9-14 | vector' },
-  { id: 'countries', name: 'Countries', description: 'z0-11 | vector' },
-  { id: 'hand-drawn-hillshade', name: 'Hand drawn hillshade', description: 'z0-9 | raster' },
-  { id: 'hillshade', name: 'Hillshade', description: 'z0-12 | raster' },
-  { id: 'land', name: 'Land', description: 'z0-14 | vector' },
-  { id: 'land-gradient', name: 'Land Gradient', description: 'z0-4 | raster' },
-  { id: 'land-gradient-dark', name: 'Land Gradient Dark', description: 'z0-4 | raster' },
-  { id: 'landcover', name: 'Landcover', description: 'z0-9 | vector' },
-  { id: 'landform', name: 'Landform', description: 'z7-14 | vector' },
-  { id: 'v3-lite', name: 'MapTiler Planet Lite v3', description: 'z0-10 | vector' },
-  { id: 'v3', name: 'MapTiler Planet v3', description: 'z0-15 | vector (deprecated)' },
-  { id: 'v4', name: 'MapTiler Planet v4', description: 'z0-15 | vector' },
-  { id: 'ocean', name: 'Ocean', description: 'z0-12 | vector' },
-  { id: 'ocean-rgb', name: 'Ocean RGB', description: 'z0-7 | raster-dem' },
-  { id: 'v3-openmaptiles', name: 'OpenMapTiles', description: 'z0-14 | vector' },
-  { id: 'outdoor', name: 'Outdoor', description: 'z5-14 | vector' },
-  { id: 'satellite-v2', name: 'Satellite v2', description: 'z0-22 | raster' },
-  { id: 'satellite-mediumres', name: 'Satellite Mediumres 2016', description: 'z0-13 | raster' },
-  { id: 'satellite-mediumres-2018', name: 'Satellite Mediumres 2018', description: 'z0-13 | raster' },
-  { id: 'terrain-quantized-mesh-v2', name: 'Terrain 3D (quantized mesh)', description: 'z0-15 | terrain' },
-  { id: 'terrain-rgb-v2', name: 'Terrain RGB', description: 'z0-14 | raster-dem' },
-  { id: 'fr-cadastre', name: 'France cadastre', description: 'z11-16 | vector' },
-  { id: 'jp-forest', name: 'JP Forest', description: 'z0-12 | raster' },
-  { id: 'jp-gsi-building', name: 'JP GSI Building', description: 'z13-15 | vector' },
-  { id: 'jp-hillshade', name: 'JP Hillshade', description: 'z0-15 | raster' },
-  { id: 'jp-mierune', name: 'JP MIERUNE OpenMapTiles', description: 'z0-15 | vector' },
-  { id: 'nl-cartiqo', name: 'NL Cartiqo', description: 'z0-16 | vector' },
-  { id: 'nl-topraster', name: 'NL PDOK TOPraster', description: 'z5-16 | raster' },
-  { id: 'ch-swisstopo-lbm', name: 'CH Swisstopo LBM', description: 'z0-14 | vector' },
-  { id: 'cadastre', name: 'Cadastre BETA', description: 'z0-17 | vector' },
-  { id: 'uk-baire250k1940', name: 'UK Bartholomew Ireland 1940s', description: 'z5-12 | raster' },
-  { id: 'uk-osgb25k1937', name: 'UK OSGB 1937', description: 'z1-16 | raster' },
-  { id: 'uk-osgb1888', name: 'UK OSGB 1888', description: 'z1-17 | raster' },
-  { id: 'uk-osgb63k1955', name: 'UK OSGB 63k 1955', description: 'z1-15 | raster' },
-  { id: 'uk-osgb63k1885', name: 'UK OSGB 63k 1885', description: 'z1-16 | raster' },
-  { id: 'uk-osgb10k1888', name: 'UK OSGB 10k 1888', description: 'z1-17 | raster' },
-  { id: 'uk-oslondon1k1893', name: 'UK OS London 1893', description: 'z9-20 | raster' },
-  { id: 'uk-openzoomstack', name: 'UK Open Zoomstack', description: 'z0-14 | vector' },
-  { id: 'uk-osgb1919', name: 'UK OSGB 1919', description: 'z1-14 | raster' }
+// Available map styles - OSM first (default), then OpenFreeMap, then MapTiler styles
+const mapStyles = [
+  // OSM (raster - default)
+  { id: 'osm', name: '🗺️ OSM Standard', provider: 'osm', description: 'OpenStreetMap raster tiles' },
+  // OpenFreeMap (vector - free, no API key)
+  { id: 'openfreemap-liberty', name: '🌍 OpenFreeMap Liberty', provider: 'openfreemap', description: 'Free vector tiles' },
+  // MapTiler styles (require API key)
+  { id: 'maptiler-basic-v2', name: '🗺️ MapTiler Basic', provider: 'maptiler', description: 'Simple clean style' },
+  { id: 'maptiler-streets-v2', name: '🛣️ MapTiler Streets', provider: 'maptiler', description: 'Detailed streets' },
+  { id: 'maptiler-topo-v2', name: '📐 MapTiler Topo', provider: 'maptiler', description: 'Topographic map' },
+  { id: 'maptiler-dataviz', name: '📊 MapTiler DataViz', provider: 'maptiler', description: 'Data visualization' },
+  { id: 'maptiler-winter-v2', name: '❄️ MapTiler Winter', provider: 'maptiler', description: 'Winter theme' },
+  { id: 'maptiler-satellite-v2', name: '🛰️ MapTiler Satellite', provider: 'maptiler', description: 'Satellite imagery' },
+  { id: 'maptiler-outdoor', name: '🏕️ MapTiler Outdoor', provider: 'maptiler', description: 'Outdoor activities' },
 ];
 
 // Location state
@@ -937,11 +902,6 @@ function roundToNearest10(value: number): number {
   const rounded = Math.round(value / 10) * 10;
   return rounded === 0 ? Math.round(value) : rounded;
 }
-
-// PDF export scaling constants
-const PDF_EXPORT_MIN_SCALE = 1; // Minimum scale factor for PDF export (increased for better label readability)
-const PDF_EXPORT_MAX_SCALE = 3; // Maximum scale factor for PDF export (increased for crisp text)
-const PDF_EXPORT_ZOOM_DIVISOR = 3; // Divide zoom level by this to get base scale (adjusted for better quality)
 
 // Clear origin field
 function clearOrigin() {
@@ -2553,21 +2513,13 @@ function addPlaceToSvg(svg: SVGSVGElement, lon: number, lat: number, name: strin
   svg.appendChild(text);
 }
 
-// PDF Map Export with Vector Support
+// Unified PDF Map Export - basemap as raster, places and routes as SVG
 async function exportPdfMap() {
   if (!map) return;
   
   showPdfExportModal.value = false;
   showStatus('Generating PDF...', 'success');
   
-  // Check if vector export is requested
-  if (pdfOptions.value.vectorExport) {
-    // If MapTiler key is available, ensure MapTiler vector tiles are enabled
-    await ensureMapTilerForVectorExport();
-    await exportVectorPdfMap();
-    return;
-  }
-  
   try {
     // Save current view state
     const originalCenter = map.getView().getCenter();
@@ -2576,334 +2528,48 @@ async function exportPdfMap() {
     // Apply auto-scale if enabled
     await applyAutoScale();
     
-    // Save current location marker features before clearing
+    // Hide current location marker during export
     const savedLocationFeatures: Feature[] = [];
     if (currentLocationSource) {
-      currentLocationSource.getFeatures().forEach(f => {
-        savedLocationFeatures.push(f);
-      });
+      currentLocationSource.getFeatures().forEach(f => savedLocationFeatures.push(f));
       currentLocationSource.clear();
     }
     
-    // Wait for the map to re-render without the location marker
+    // Wait for the map to re-render
     await new Promise(resolve => setTimeout(resolve, 100));
     
-    // Temporarily filter markers based on export content setting
-    const originalMarkersState: Feature[] = [];
-    const originalRouteState: Feature[] = [];
-    
-    if (markersSource && pdfOptions.value.exportContent !== 'both') {
-      const featuresToRemove: Feature[] = [];
-      markersSource.getFeatures().forEach((f) => {
-        const featureType = f.get('type');
-        if (pdfOptions.value.exportContent === 'routes' && featureType === 'place') {
-          featuresToRemove.push(f);
-        }
-      });
-      featuresToRemove.forEach(f => {
-        originalMarkersState.push(f);
-        markersSource?.removeFeature(f);
-      });
-    }
-    
-    if (routeSource && pdfOptions.value.exportContent === 'places') {
-      const featuresToRemove: Feature[] = [];
-      routeSource.getFeatures().forEach((f) => {
-        featuresToRemove.push(f);
-      });
-      featuresToRemove.forEach(f => {
-        originalRouteState.push(f);
-        routeSource?.removeFeature(f);
-      });
-    }
-    
-    // Wait for changes to render
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    const mapCanvas = map.getViewport().querySelector('canvas');
+    // Get map canvas for basemap export
+    const mapCanvas = map.getViewport().querySelector('canvas') as HTMLCanvasElement;
     if (!mapCanvas) {
-      // Restore features before showing error
-      originalMarkersState.forEach(f => markersSource?.addFeature(f));
-      originalRouteState.forEach(f => routeSource?.addFeature(f));
       savedLocationFeatures.forEach(f => currentLocationSource?.addFeature(f));
       showStatus('Could not capture map', 'error');
       return;
     }
     
-    // Create a higher resolution export canvas for better label legibility
-    // Use zoom-based scaling: higher zoom = higher resolution for text clarity
-    const exportCanvas = document.createElement('canvas');
-    const currentZoom = map.getView().getZoom() || 10;
-    
-    // Enhanced scale calculation for better text readability
-    // Base scale increases with zoom level, ensuring labels are always crisp
-    let scale = Math.min(PDF_EXPORT_MAX_SCALE, Math.max(PDF_EXPORT_MIN_SCALE, Math.ceil(currentZoom / PDF_EXPORT_ZOOM_DIVISOR)));
-    
-    // Apply device pixel ratio for even better quality on high-DPI displays
-    const dpr = window.devicePixelRatio || 1;
-    scale = scale * Math.min(dpr, 2); // Cap DPR contribution at 2x to avoid excessive file sizes
-    
-    exportCanvas.width = mapCanvas.width * scale;
-    exportCanvas.height = mapCanvas.height * scale;
-    const ctx = exportCanvas.getContext('2d', { 
-      alpha: false, // Disable alpha for better performance and smaller file size
-      willReadFrequently: false 
-    });
-    
-    if (!ctx) {
-      // Restore features before showing error
-      originalMarkersState.forEach(f => markersSource?.addFeature(f));
-      originalRouteState.forEach(f => routeSource?.addFeature(f));
-      savedLocationFeatures.forEach(f => currentLocationSource?.addFeature(f));
-      // Restore original view if autoscale was used
-      if (pdfOptions.value.scale === 'auto' && originalCenter && originalZoom) {
-        map.getView().setCenter(originalCenter);
-        map.getView().setZoom(originalZoom);
-      }
-      showStatus('Could not create export canvas', 'error');
-      return;
-    }
-    
-    // Enable image smoothing for better quality
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    
-    // Draw the map canvas onto the export canvas with scaling
-    ctx.scale(scale, scale);
-    ctx.drawImage(mapCanvas, 0, 0);
-    
-    const pdf = new jsPDF({
-      orientation: 'landscape',
-      unit: 'mm',
-      format: pdfOptions.value.pageSize,
-    });
-    
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
-    const margin = 10;
-    
-    // Add title
-    if (pdfOptions.value.title) {
-      pdf.setFontSize(pdfOptions.value.pageSize === 'a3' ? 20 : 16);
-      pdf.setFont('helvetica', 'bold');
-      pdf.text(pdfOptions.value.title, pageWidth / 2, margin + 5, { align: 'center' });
-    }
-    
-    // Calculate map area
-    const titleHeight = pdfOptions.value.title ? (pdfOptions.value.pageSize === 'a3' ? 18 : 15) : 0;
-    const legendHeight = pdfOptions.value.showLegend ? (pdfOptions.value.pageSize === 'a3' ? 25 : 20) : 0;
-    const mapTop = margin + titleHeight;
-    const availableWidth = pageWidth - margin * 2;
-    const availableHeight = pageHeight - margin * 2 - titleHeight - legendHeight;
-    
-    // Calculate proper aspect ratio to prevent deformation
-    const canvasAspect = exportCanvas.width / exportCanvas.height;
-    let mapWidth = availableWidth;
-    let mapHeight = availableWidth / canvasAspect;
-    
-    if (mapHeight > availableHeight) {
-      mapHeight = availableHeight;
-      mapWidth = availableHeight * canvasAspect;
-    }
-    
-    // Center the map horizontally
-    const mapLeft = margin + (availableWidth - mapWidth) / 2;
-    
-    // Add map image with proper aspect ratio
-    // Use JPEG format with 0.85 quality for basemap images - reduces file size significantly
-    // while maintaining good visual quality for map tiles
-    const imgData = exportCanvas.toDataURL('image/jpeg', 0.85);
-    pdf.addImage(imgData, 'JPEG', mapLeft, mapTop, mapWidth, mapHeight, undefined, 'FAST');
-    
-    // Add north pointer
-    if (pdfOptions.value.showNorthPointer) {
-      const npX = mapLeft + mapWidth - 10;
-      const npY = mapTop + 10;
-      pdf.setFillColor(255, 255, 255);
-      pdf.circle(npX, npY, 5, 'F');
-      pdf.setDrawColor(0, 0, 0);
-      pdf.circle(npX, npY, 5, 'S');
-      pdf.setFontSize(8);
-      pdf.setFont('helvetica', 'bold');
-      pdf.text('N', npX, npY + 1, { align: 'center' });
-      // Arrow
-      pdf.setLineWidth(0.5);
-      pdf.line(npX, npY - 7, npX, npY - 3);
-      pdf.line(npX - 2, npY - 5, npX, npY - 7);
-      pdf.line(npX + 2, npY - 5, npX, npY - 7);
-    }
-    
-    // Add scale bar
-    if (pdfOptions.value.showScaleBar) {
-      const view = map.getView();
-      const resolution = view.getResolution();
-      if (resolution && resolution > 0) {
-        const center = view.getCenter();
-        if (center) {
-          const centerLonLat = toLonLat(center);
-          // Calculate distance per pixel at map center
-          const pixelDistance = 100; // pixels
-          const offsetPoint = toLonLat([center[0] + resolution * pixelDistance, center[1]]);
-          const distanceFor100px = getDistance(centerLonLat, offsetPoint);
-          
-          // Choose a nice round number for the scale bar
-          const niceScaleValues = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000];
-          let selectedScale = niceScaleValues[0];
-          let scaleBarPixels = 100;
-          
-          // Find the best scale value that fits approximately 100 pixels (30mm on PDF)
-          for (const niceValue of niceScaleValues) {
-            const pixelsNeeded = (niceValue / distanceFor100px) * pixelDistance;
-            if (pixelsNeeded >= 50 && pixelsNeeded <= 200) {
-              selectedScale = niceValue;
-              scaleBarPixels = pixelsNeeded;
-              break;
-            }
-          }
-          
-          // Format the scale label
-          let scaleLabel: string;
-          if (selectedScale >= 1000) {
-            scaleLabel = `${selectedScale / 1000} km`;
-          } else {
-            scaleLabel = `${selectedScale} m`;
-          }
-          
-          // Convert pixel width to PDF mm width (approximately)
-          const pdfScaleBarWidth = (scaleBarPixels / mapCanvas.width) * mapWidth;
-          const sbX = mapLeft + 5;
-          const sbY = mapTop + mapHeight - 5;
-          const sbWidth = Math.max(15, Math.min(60, pdfScaleBarWidth));
-          
-          pdf.setFillColor(255, 255, 255);
-          pdf.rect(sbX - 2, sbY - 5, sbWidth + 4, 8, 'F');
-          pdf.setDrawColor(0, 0, 0);
-          pdf.setLineWidth(0.5);
-          pdf.line(sbX, sbY, sbX + sbWidth, sbY);
-          pdf.line(sbX, sbY - 2, sbX, sbY);
-          pdf.line(sbX + sbWidth, sbY - 2, sbX + sbWidth, sbY);
-          pdf.setFontSize(7);
-          pdf.setFont('helvetica', 'normal');
-          pdf.text(scaleLabel, sbX + sbWidth / 2, sbY - 2, { align: 'center' });
-        }
-      }
-    }
-    
-    // Add legend based on export content
-    if (pdfOptions.value.showLegend) {
-      const legendY = pageHeight - margin - legendHeight + 5;
-      pdf.setFontSize(pdfOptions.value.pageSize === 'a3' ? 12 : 10);
-      pdf.setFont('helvetica', 'bold');
-      pdf.text('Legend:', margin, legendY);
-      
-      let legendX = margin + 25;
-      pdf.setFontSize(pdfOptions.value.pageSize === 'a3' ? 10 : 8);
-      pdf.setFont('helvetica', 'normal');
-      
-      const showPlaces = (pdfOptions.value.exportContent === 'both' || pdfOptions.value.exportContent === 'places') && savedPlaces.value.length > 0;
-      const showRoutes = (pdfOptions.value.exportContent === 'both' || pdfOptions.value.exportContent === 'routes') && (savedRoutes.value.length > 0 || currentRouteCoordinates.value.length > 0);
-      
-      if (showPlaces) {
-        pdf.setFillColor(239, 68, 68);
-        pdf.circle(legendX, legendY - 1, 2, 'F');
-        pdf.text('Places', legendX + 5, legendY);
-        legendX += 35;
-      }
-      
-      if (showRoutes) {
-        pdf.setDrawColor(34, 197, 94);
-        pdf.setLineWidth(1);
-        pdf.line(legendX, legendY - 1, legendX + 10, legendY - 1);
-        pdf.text('Routes', legendX + 15, legendY);
-      }
-    }
-    
-    // Add date
-    pdf.setFontSize(8);
-    pdf.setFont('helvetica', 'normal');
-    pdf.text(`Generated with ronBureau by ${auth.user?.userId ?? 'unknown user'} on ${new Date().toLocaleDateString()}`, pageWidth - margin, pageHeight - margin, { align: 'right' });
-    // Credits required by OpenStreetMap license
-    const creditsText = 'Map data © OpenStreetMap contributors — https://osmfoundation.org/Licence';
-    pdf.text(creditsText, margin, pageHeight - margin, { align: 'left' });
-    
-    // Restore hidden features
-    originalMarkersState.forEach((f) => {
-      markersSource?.addFeature(f);
-    });
-    originalRouteState.forEach((f) => {
-      routeSource?.addFeature(f);
-    });
-    
-    // Restore current location features
-    savedLocationFeatures.forEach((f) => {
-      currentLocationSource?.addFeature(f);
-    });
-    
-    // Restore original view if autoscale was used
-    if (pdfOptions.value.scale === 'auto' && originalCenter && originalZoom) {
-      map.getView().setCenter(originalCenter);
-      map.getView().setZoom(originalZoom);
-    }
-    
-    pdf.save(`map-${new Date().toISOString().split('T')[0]}.pdf`);
-    showStatus('PDF exported successfully!', 'success');
-  } catch (error) {
-    console.error('PDF export failed:', error);
-    showStatus('Failed to export PDF', 'error');
-  }
-}
-
-// Vector PDF Export (SVG → PDF)
-async function exportVectorPdfMap() {
-  if (!map) return;
-  
-  try {
-    // Save current view state
-    const originalCenter = map.getView().getCenter();
-    const originalZoom = map.getView().getZoom();
-    
-    // Apply auto-scale if enabled
-    await applyAutoScale();
-    
     // Get map size
     const mapSize = map.getSize();
     if (!mapSize) {
+      savedLocationFeatures.forEach(f => currentLocationSource?.addFeature(f));
       showStatus('Could not get map size', 'error');
       return;
     }
     
-    const [mapWidth, mapHeight] = mapSize;
-    // If user requested a fully vector basemap (no raster) ensure vector tiles are available.
-    if (!pdfOptions.value.includeBasemap) {
-      // Try to enable MapTiler vector tiles (or existing vector provider)
-      const ok = await ensureMapTilerForVectorExport();
-      if (!ok && (!useVectorTiles.value || !vectorTileProvider.value)) {
-        // Could not enable vector basemap — fallback to raster basemap to avoid exporting empty basemap
-        pdfOptions.value.includeBasemap = true;
-        showStatus('MapTiler/OpenFreeMap vector tiles unavailable — falling back to raster basemap for PDF export', 'error');
-      }
-    }
+    const [svgWidth, svgHeight] = mapSize;
     
-    // Create SVG
-    const svg = generateSvgFromFeatures(mapWidth, mapHeight);
+    // Create SVG with basemap as raster background + places/routes as vector
+    const svg = generateSvgFromFeatures(svgWidth, svgHeight);
     
-    // Optionally add basemap as raster background
-    if (pdfOptions.value.includeBasemap) {
-      const mapCanvas = map.getViewport().querySelector('canvas') as HTMLCanvasElement;
-      if (mapCanvas) {
-        // Use JPEG format with 0.85 quality for smaller file size
-        const imgData = mapCanvas.toDataURL('image/jpeg', 0.85);
-        const image = document.createElementNS('http://www.w3.org/2000/svg', 'image');
-        image.setAttribute('href', imgData);
-        image.setAttribute('x', '0');
-        image.setAttribute('y', '0');
-        image.setAttribute('width', mapWidth.toString());
-        image.setAttribute('height', mapHeight.toString());
-        svg.insertBefore(image, svg.firstChild);
-      }
-    }
+    // Add basemap as raster background (always)
+    const imgData = mapCanvas.toDataURL('image/jpeg', 0.85);
+    const image = document.createElementNS('http://www.w3.org/2000/svg', 'image');
+    image.setAttribute('href', imgData);
+    image.setAttribute('x', '0');
+    image.setAttribute('y', '0');
+    image.setAttribute('width', svgWidth.toString());
+    image.setAttribute('height', svgHeight.toString());
+    svg.insertBefore(image, svg.firstChild);
     
-    // Add routes to SVG
+    // Add routes to SVG (as vector)
     if (pdfOptions.value.exportContent !== 'places') {
       // Add saved routes
       savedRoutes.value.forEach((route) => {
@@ -2918,14 +2584,14 @@ async function exportVectorPdfMap() {
       }
     }
     
-    // Add places to SVG
+    // Add places to SVG (as vector)
     if (pdfOptions.value.exportContent !== 'routes') {
       savedPlaces.value.forEach((place) => {
         addPlaceToSvg(svg, place.lon, place.lat, place.name, place.color || customization.value.placeMarkerColor, 8);
       });
     }
     
-    // Add direction markers (origin, destination, stops)
+    // Add direction markers (origin, destination, stops) as vector
     if (pdfOptions.value.exportContent !== 'places') {
       if (origin.value) {
         addPlaceToSvg(svg, origin.value.lon, origin.value.lat, 'A', '#22c55e', 10);
@@ -2964,7 +2630,7 @@ async function exportVectorPdfMap() {
     const availableHeight = pageHeight - margin * 2 - titleHeight - legendHeight;
     
     // Calculate SVG scale to fit in PDF
-    const svgAspect = mapWidth / mapHeight;
+    const svgAspect = svgWidth / svgHeight;
     let pdfMapWidth = availableWidth;
     let pdfMapHeight = availableWidth / svgAspect;
     
@@ -2988,17 +2654,20 @@ async function exportVectorPdfMap() {
     // Add decorations (north pointer, scale bar, legend, credits)
     addPdfDecorations(pdf, mapLeft, mapTop, pdfMapWidth, pdfMapHeight, pageWidth, pageHeight, margin);
     
-    // Restore view if modified
+    // Restore current location features
+    savedLocationFeatures.forEach(f => currentLocationSource?.addFeature(f));
+    
+    // Restore original view if autoscale was used
     if (pdfOptions.value.scale === 'auto' && originalCenter && originalZoom) {
       map.getView().setCenter(originalCenter);
       map.getView().setZoom(originalZoom);
     }
     
-    pdf.save(`map-vector-${new Date().toISOString().split('T')[0]}.pdf`);
-    showStatus('Vector PDF exported successfully!', 'success');
+    pdf.save(`map-${new Date().toISOString().split('T')[0]}.pdf`);
+    showStatus('PDF exported successfully!', 'success');
   } catch (error) {
-    console.error('Vector PDF export failed:', error);
-    showStatus('Failed to export vector PDF', 'error');
+    console.error('PDF export failed:', error);
+    showStatus('Failed to export PDF', 'error');
   }
 }
 
@@ -3172,89 +2841,93 @@ function handleMapClick(event: { coordinate: number[] }) {
   }
 }
 
-// Handle map style change - automatically enables vector tiles when a style is selected
+// Handle map style change - supports OSM (raster), OpenFreeMap (vector), and MapTiler (vector)
 async function onMapStyleChange() {
-  // Always use vector tiles when MapTiler style is selected
-  if (!useVectorTiles.value) {
-    useVectorTiles.value = true;
-  }
-  
-  // If already using vector tiles, just switch the style
-  if (map) {
-    const layers = map.getLayers();
-    if (vectorTileLayer) {
-      layers.remove(vectorTileLayer);
-      vectorTileLayer = null;
-    }
-    await toggleVectorTiles();
-  }
-}
-
-// Toggle between raster and vector tiles
-async function toggleVectorTiles() {
   if (!map) return;
   
   const layers = map.getLayers();
+  const selectedStyle = mapStyles.find(s => s.id === selectedMapStyle.value);
   
-  if (useVectorTiles.value) {
-    // Switch to vector tiles
-    if (!vectorTileLayer) {
-      showStatus('Loading vector tiles...', 'success');
+  if (!selectedStyle) {
+    showStatus('Unknown map style', 'error');
+    return;
+  }
+  
+  // Remove existing vector tile layer if any
+  if (vectorTileLayer) {
+    layers.remove(vectorTileLayer);
+    vectorTileLayer = null;
+  }
+  
+  try {
+    if (selectedStyle.provider === 'osm') {
+      // OSM raster tiles (default)
+      useVectorTiles.value = false;
+      tileProvider.value = 'osm';
+      layers.setAt(0, new TileLayer({ source: new OSM() }));
+      showStatus('🗺️ OSM Standard loaded', 'success');
       
-      try {
-        // Try MapTiler first if API key is available
-        const maptilerKey = config.public.maptilerApiKey;
-        
-        if (maptilerKey && maptilerKey !== 'get_your_free_key_at_https://maptiler.com' && maptilerKey.length > 10) {
-          // Use MapTiler vector tiles (high quality, with labels)
-          vectorTileLayer = new VectorTileLayer({
-            declutter: true,
-            source: new VectorTileSource({
-              format: new MVT(),
-              url: `https://api.maptiler.com/tiles/v3/{z}/{x}/{y}.pbf?key=${maptilerKey}`,
-              maxZoom: 14,
-            }),
-          });
-          
-          // Apply selected MapTiler style
-          const styleUrl = `https://api.maptiler.com/maps/${maptilerStyle.value}/style.json?key=${maptilerKey}`;
-          await applyStyle(vectorTileLayer, styleUrl);
-          vectorTileProvider.value = 'maptiler';
-          const selectedStyle = maptilerStyles.find(s => s.id === maptilerStyle.value);
-          showStatus(`✨ ${selectedStyle?.name || 'MapTiler'} style loaded`, 'success');
-        } else {
-          // Fallback to OpenFreeMap (free, no key required)
-          vectorTileLayer = new VectorTileLayer({
-            declutter: true,
-            source: new VectorTileSource({
-              format: new MVT(),
-              url: 'https://tiles.openfreemap.org/planet/{z}/{x}/{y}.pbf',
-              maxZoom: 14,
-            }),
-          });
-          
-          // Apply OpenFreeMap Liberty style
-          const styleUrl = 'https://tiles.openfreemap.org/styles/liberty';
-          await applyStyle(vectorTileLayer, styleUrl);
-          vectorTileProvider.value = 'openfreemap';
-          showStatus('🌍 Vector tiles loaded (OpenFreeMap - Free)', 'success');
-        }
-      } catch (error) {
-        console.error('Failed to load vector tiles:', error);
-        showStatus('Failed to load vector tiles, using raster', 'error');
-        useVectorTiles.value = false;
-        vectorTileProvider.value = null;
+    } else if (selectedStyle.provider === 'openfreemap') {
+      // OpenFreeMap vector tiles (free, no API key)
+      useVectorTiles.value = true;
+      vectorTileLayer = new VectorTileLayer({
+        declutter: true,
+        source: new VectorTileSource({
+          format: new MVT(),
+          url: 'https://tiles.openfreemap.org/planet/{z}/{x}/{y}.pbf',
+          maxZoom: 14,
+        }),
+      });
+      
+      const styleUrl = 'https://tiles.openfreemap.org/styles/liberty';
+      await applyStyle(vectorTileLayer, styleUrl);
+      tileProvider.value = 'openfreemap';
+      layers.setAt(0, vectorTileLayer);
+      showStatus('🌍 OpenFreeMap Liberty loaded', 'success');
+      
+    } else if (selectedStyle.provider === 'maptiler') {
+      // MapTiler vector tiles (requires API key)
+      const maptilerKey = config.public.maptilerApiKey;
+      
+      if (!maptilerKey || maptilerKey === 'get_your_free_key_at_https://maptiler.com' || maptilerKey.length < 10) {
+        showStatus('MapTiler requires an API key. Using OSM instead.', 'error');
+        selectedMapStyle.value = 'osm';
+        await onMapStyleChange();
         return;
       }
+      
+      useVectorTiles.value = true;
+      vectorTileLayer = new VectorTileLayer({
+        declutter: true,
+        source: new VectorTileSource({
+          format: new MVT(),
+          url: `https://api.maptiler.com/tiles/v3/{z}/{x}/{y}.pbf?key=${maptilerKey}`,
+          maxZoom: 14,
+        }),
+      });
+      
+      // Extract the MapTiler style ID from the selected style
+      const maptilerStyleId = selectedStyle.id.replace('maptiler-', '');
+      const styleUrl = `https://api.maptiler.com/maps/${maptilerStyleId}/style.json?key=${maptilerKey}`;
+      await applyStyle(vectorTileLayer, styleUrl);
+      tileProvider.value = 'maptiler';
+      layers.setAt(0, vectorTileLayer);
+      showStatus(`✨ ${selectedStyle.name} loaded`, 'success');
     }
-    
-    layers.setAt(0, vectorTileLayer);
-  } else {
-    // Switch back to raster tiles
+  } catch (error) {
+    console.error('Failed to load map style:', error);
+    showStatus('Failed to load map style, using OSM', 'error');
+    selectedMapStyle.value = 'osm';
+    useVectorTiles.value = false;
+    tileProvider.value = 'osm';
     layers.setAt(0, new TileLayer({ source: new OSM() }));
-    vectorTileProvider.value = null;
-    showStatus('Switched to raster tiles', 'success');
   }
+}
+
+// Legacy toggle function - kept for compatibility but now delegates to onMapStyleChange
+async function toggleVectorTiles() {
+  // This function is now deprecated - use onMapStyleChange instead
+  await onMapStyleChange();
 }
 
 // Initialize map
@@ -3304,11 +2977,8 @@ onMounted(() => {
     // Add click handler
     map.on('click', handleMapClick);
     
-    // Auto-enable vector tiles if MapTiler API key is available
-    if (vectorTilesAvailable.value) {
-      useVectorTiles.value = true;
-      toggleVectorTiles();
-    }
+    // Initialize with OSM (default) - tileProvider is set for consistency
+    tileProvider.value = 'osm';
   }
 });
 
