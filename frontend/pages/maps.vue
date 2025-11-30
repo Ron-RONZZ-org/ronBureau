@@ -10,15 +10,15 @@
             </button>
           </div>
           
-            <!-- Map Style Selector (OSM default, OpenFreeMap, MapTiler) -->
-            <div class="sidebar-style-selector">
-              <label for="map-style">Map Style:</label>
-              <select id="map-style" v-model="selectedMapStyle" @change="onMapStyleChange" class="select select-sm">
-                <option v-for="style in mapStyles" :key="style.id" :value="style.id">
-                  {{ style.name }}
-                </option>
-              </select>
-            </div>
+          <!-- Map Style Selector (OSM default, OpenFreeMap, MapTiler) -->
+          <div class="sidebar-style-selector">
+            <label for="map-style">Map Style:</label>
+            <select id="map-style" v-model="selectedMapStyle" @change="onMapStyleChange" class="select select-sm">
+              <option v-for="style in mapStyles" :key="style.id" :value="style.id">
+                {{ style.name }}
+              </option>
+            </select>
+          </div>
 
           <!-- Search Mode Toggle -->
           <div class="search-mode-toggle">
@@ -867,11 +867,6 @@ const filteredRouteLists = computed(() => {
 });
 
 // Check if vector tiles are available (MapTiler key exists)
-const vectorTilesAvailable = computed(() => {
-  const maptilerKey = config.public.maptilerApiKey;
-  return maptilerKey && maptilerKey !== 'get_your_free_key_at_https://maptiler.com' && maptilerKey.length > 10;
-});
-
 // Show status message helper
 function showStatus(message: string, type: 'success' | 'error') {
   statusMessage.value = message;
