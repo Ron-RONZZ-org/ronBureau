@@ -1,4 +1,5 @@
 <template>
+  <ClientOnly>
   <nav class="navbar">
     <div class="navbar-container">
       <NuxtLink to="/home" class="navbar-brand">
@@ -6,7 +7,6 @@
         RonBureau
       </NuxtLink>
 
-      <ClientOnly>
         <template v-if="auth.isAuthenticated">
           <div class="navbar-menu">
             <NuxtLink to="/home" class="nav-link" :class="{ active: route.path === '/home' }">
@@ -28,9 +28,9 @@
             <button class="btn btn-outline" @click="handleLogout">Logout</button>
           </div>
         </template>
-      </ClientOnly>
-    </div>
-  </nav>
+      </div>
+    </nav>
+  </ClientOnly>
 </template>
 
 <script setup lang="ts">
