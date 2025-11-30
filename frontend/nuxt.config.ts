@@ -7,6 +7,7 @@ export default defineNuxtConfig({
     public: {
       apiBase: process.env.API_BASE || 'http://localhost:3001',
       graphhopperApiKey: process.env.GRAPHHOPPER_API_KEY || '',
+      maptilerApiKey: process.env.MAPTILER_API_KEY || '',
     },
   },
   app: {

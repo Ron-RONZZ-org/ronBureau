@@ -9,6 +9,26 @@
               {{ isGettingLocation ? '📍...' : '📍 My Location' }}
             </button>
           </div>
+          
+          <div v-if="vectorTilesAvailable || (useVectorTiles && vectorTileProvider)" class="vector-tiles-status">
+            <!-- MapTiler Style Selector (visible when MapTiler key available) -->
+            <div v-if="vectorTilesAvailable" class="sidebar-style-selector">
+              <div v-if="useVectorTiles">
+              <label for="maptiler-style">Style:</label>
+              <select id="maptiler-style" v-model="maptilerStyle" @change="switchMapTilerStyle" class="select select-sm">
+                <option v-for="style in maptilerStyles" :key="style.id" :value="style.id">
+                  {{ style.name }}
+                </option>
+              </select>
+            </div>
+              <div style="display:flex; gap:0.5rem; align-items:center; margin-top:0.25rem;">
+                <button class="btn btn-sm" @click="useVectorTiles = !useVectorTiles; toggleVectorTiles()">
+                  {{ useVectorTiles ? 'Use Raster' : 'Use Vector' }}
+                </button>
+                <p v-if="!useVectorTiles" class="hint-text" style="margin: 0;">Enable Vector Tiles for more styles</p>
+              </div>
+            </div>
+          </div>
 
           <!-- Search Mode Toggle -->
           <div class="search-mode-toggle">
@@ -399,6 +419,14 @@
             <button class="map-control-btn" @click="goToCurrentLocation" :disabled="isGettingLocation" title="My Location">
               📍
             </button>
+            <button 
+              class="map-control-btn" 
+              @click="useVectorTiles = !useVectorTiles; toggleVectorTiles()" 
+              :title="useVectorTiles ? 'Switch to Raster Tiles' : 'Switch to Vector Tiles'"
+              :class="{ 'active': useVectorTiles }"
+            >
+              {{ useVectorTiles ? '🗺️' : '🌐' }}
+            </button>
           </div>
         </div>
 
@@ -436,6 +464,22 @@
               <label><input type="checkbox" v-model="pdfOptions.showLegend" /> Show Legend</label>
               <label><input type="checkbox" v-model="pdfOptions.showScaleBar" /> Show Scale Bar</label>
               <label><input type="checkbox" v-model="pdfOptions.showNorthPointer" /> Show North Pointer</label>
+            </div>
+            <div class="checkbox-group">
+              <label><input type="checkbox" v-model="pdfOptions.vectorExport" /> <strong>🎯 Vector Export (SVG→PDF)</strong></label>
+              <p style="font-size: 0.85em; color: #64748b; margin: 0.25rem 0 0 1.5rem;">Higher quality, sharp text/lines at any zoom level</p>
+            </div>
+            <div v-if="pdfOptions.vectorExport" class="checkbox-group" style="margin-left: 1.5rem; padding-left: 1rem; border-left: 2px solid #e2e8f0;">
+              <div v-if="vectorTilesAvailable">
+                <label><input type="checkbox" v-model="pdfOptions.useVectorBasemap" /> <strong>Use vector basemap</strong> (⏱️ longer export time)</label>
+                <p style="font-size: 0.85em; color: #64748b; margin: 0.25rem 0 0 1.5rem;">
+                  {{ useVectorTiles && vectorTileProvider ? `Currently using ${vectorTileProvider === 'maptiler' ? 'MapTiler' : 'OpenFreeMap'} vector tiles` : 'Will enable MapTiler vector tiles for export' }}
+                </p>
+              </div>
+              <div v-if="!pdfOptions.useVectorBasemap">
+                <label style="margin-top: 0.5rem;"><input type="checkbox" v-model="pdfOptions.includeBasemap" /> Include Basemap (as raster)</label>
+                <p style="font-size: 0.85em; color: #64748b; margin: 0.25rem 0 0 1.5rem;">Places & routes will be vector, basemap will be raster</p>
+              </div>
             </div>
             <div class="modal-buttons">
               <button class="btn btn-outline" @click="showPdfExportModal = false">Cancel</button>
@@ -645,8 +689,11 @@ import Map from 'ol/Map';
 import View from 'ol/View';
 import TileLayer from 'ol/layer/Tile';
 import VectorLayer from 'ol/layer/Vector';
+import VectorTileLayer from 'ol/layer/VectorTile';
 import VectorSource from 'ol/source/Vector';
+import VectorTileSource from 'ol/source/VectorTile';
 import OSM from 'ol/source/OSM';
+import MVT from 'ol/format/MVT';
 import { fromLonLat, toLonLat } from 'ol/proj';
 import { Point, LineString } from 'ol/geom';
 import Feature from 'ol/Feature';
@@ -654,6 +701,8 @@ import { Style, Circle, Fill, Stroke, Text } from 'ol/style';
 import GeoJSON from 'ol/format/GeoJSON';
 import { getDistance } from 'ol/sphere';
 import { jsPDF } from 'jspdf';
+import { svg2pdf } from 'svg2pdf.js';
+import { apply as applyStyle } from 'ol-mapbox-style';
 
 const config = useRuntimeConfig();
 
@@ -766,7 +815,65 @@ const pdfOptions = ref({
   showLegend: true,
   showScaleBar: true,
   showNorthPointer: true,
+  vectorExport: false, // New: use SVG vector export instead of raster
+  includeBasemap: true, // New: include basemap in vector export (as raster)
+  useVectorBasemap: false, // New: user choice to use vector basemap (longer export time)
 });
+
+// Vector tiles state
+const useVectorTiles = ref(false);
+const vectorTileProvider = ref<'maptiler' | 'openfreemap' | null>(null);
+const maptilerStyle = ref<string>('basic-v2'); // Selected MapTiler style
+let vectorTileLayer: VectorTileLayer | null = null;
+
+// Available MapTiler styles / tilesets (extracted from temp.html)
+const maptilerStyles = [
+    { id: 'basic-v2', name: '🗺️ Basic', description: 'Simple clean style (MapTiler built-in)' },
+  { id: 'streets-v2', name: '🛣️ Streets', description: 'Detailed streets (MapTiler built-in)' },
+  { id: 'topo-v2', name: '📐 Topo', description: 'Topographic map (MapTiler built-in)' },
+  { id: 'dataviz', name: '📊 DataViz', description: 'Data visualization (MapTiler built-in)' },
+  { id: 'winter-v2', name: '❄️ Winter', description: 'Winter theme (MapTiler built-in)' },
+  { id: 'buildings', name: 'Buildings', description: 'z12-15 | vector' },
+  { id: 'contours-v2', name: 'Contours v2', description: 'z9-14 | vector' },
+  { id: 'countries', name: 'Countries', description: 'z0-11 | vector' },
+  { id: 'hand-drawn-hillshade', name: 'Hand drawn hillshade', description: 'z0-9 | raster' },
+  { id: 'hillshade', name: 'Hillshade', description: 'z0-12 | raster' },
+  { id: 'land', name: 'Land', description: 'z0-14 | vector' },
+  { id: 'land-gradient', name: 'Land Gradient', description: 'z0-4 | raster' },
+  { id: 'land-gradient-dark', name: 'Land Gradient Dark', description: 'z0-4 | raster' },
+  { id: 'landcover', name: 'Landcover', description: 'z0-9 | vector' },
+  { id: 'landform', name: 'Landform', description: 'z7-14 | vector' },
+  { id: 'v3-lite', name: 'MapTiler Planet Lite v3', description: 'z0-10 | vector' },
+  { id: 'v3', name: 'MapTiler Planet v3', description: 'z0-15 | vector (deprecated)' },
+  { id: 'v4', name: 'MapTiler Planet v4', description: 'z0-15 | vector' },
+  { id: 'ocean', name: 'Ocean', description: 'z0-12 | vector' },
+  { id: 'ocean-rgb', name: 'Ocean RGB', description: 'z0-7 | raster-dem' },
+  { id: 'v3-openmaptiles', name: 'OpenMapTiles', description: 'z0-14 | vector' },
+  { id: 'outdoor', name: 'Outdoor', description: 'z5-14 | vector' },
+  { id: 'satellite-v2', name: 'Satellite v2', description: 'z0-22 | raster' },
+  { id: 'satellite-mediumres', name: 'Satellite Mediumres 2016', description: 'z0-13 | raster' },
+  { id: 'satellite-mediumres-2018', name: 'Satellite Mediumres 2018', description: 'z0-13 | raster' },
+  { id: 'terrain-quantized-mesh-v2', name: 'Terrain 3D (quantized mesh)', description: 'z0-15 | terrain' },
+  { id: 'terrain-rgb-v2', name: 'Terrain RGB', description: 'z0-14 | raster-dem' },
+  { id: 'fr-cadastre', name: 'France cadastre', description: 'z11-16 | vector' },
+  { id: 'jp-forest', name: 'JP Forest', description: 'z0-12 | raster' },
+  { id: 'jp-gsi-building', name: 'JP GSI Building', description: 'z13-15 | vector' },
+  { id: 'jp-hillshade', name: 'JP Hillshade', description: 'z0-15 | raster' },
+  { id: 'jp-mierune', name: 'JP MIERUNE OpenMapTiles', description: 'z0-15 | vector' },
+  { id: 'nl-cartiqo', name: 'NL Cartiqo', description: 'z0-16 | vector' },
+  { id: 'nl-topraster', name: 'NL PDOK TOPraster', description: 'z5-16 | raster' },
+  { id: 'ch-swisstopo-lbm', name: 'CH Swisstopo LBM', description: 'z0-14 | vector' },
+  { id: 'cadastre', name: 'Cadastre BETA', description: 'z0-17 | vector' },
+  { id: 'uk-baire250k1940', name: 'UK Bartholomew Ireland 1940s', description: 'z5-12 | raster' },
+  { id: 'uk-osgb25k1937', name: 'UK OSGB 1937', description: 'z1-16 | raster' },
+  { id: 'uk-osgb1888', name: 'UK OSGB 1888', description: 'z1-17 | raster' },
+  { id: 'uk-osgb63k1955', name: 'UK OSGB 63k 1955', description: 'z1-15 | raster' },
+  { id: 'uk-osgb63k1885', name: 'UK OSGB 63k 1885', description: 'z1-16 | raster' },
+  { id: 'uk-osgb10k1888', name: 'UK OSGB 10k 1888', description: 'z1-17 | raster' },
+  { id: 'uk-oslondon1k1893', name: 'UK OS London 1893', description: 'z9-20 | raster' },
+  { id: 'uk-openzoomstack', name: 'UK Open Zoomstack', description: 'z0-14 | vector' },
+  { id: 'uk-osgb1919', name: 'UK OSGB 1919', description: 'z1-14 | raster' }
+];
 
 // Location state
 const isGettingLocation = ref(false);
@@ -829,6 +936,12 @@ const filteredRouteLists = computed(() => {
   return routeLists.value.filter(list => list.name.toLowerCase().includes(query));
 });
 
+// Check if vector tiles are available (MapTiler key exists)
+const vectorTilesAvailable = computed(() => {
+  const maptilerKey = config.public.maptilerApiKey;
+  return maptilerKey && maptilerKey !== 'get_your_free_key_at_https://maptiler.com' && maptilerKey.length > 10;
+});
+
 // Show status message helper
 function showStatus(message: string, type: 'success' | 'error') {
   statusMessage.value = message;
@@ -840,7 +953,7 @@ function showStatus(message: string, type: 'success' | 'error') {
 }
 
 // Handle field blur with delay to allow button clicks
-const FIELD_BLUR_DELAY = 500; // ms delay before hiding field action buttons
+const FIELD_BLUR_DELAY = 3000; // ms delay before hiding field action buttons
 
 // Track if mouse is over action buttons
 const isMouseOverActionButtons = ref(false);
@@ -861,9 +974,9 @@ function roundToNearest10(value: number): number {
 }
 
 // PDF export scaling constants
-const PDF_EXPORT_MIN_SCALE = 3; // Minimum scale factor for PDF export
-const PDF_EXPORT_MAX_SCALE = 6; // Maximum scale factor for PDF export
-const PDF_EXPORT_ZOOM_DIVISOR = 4; // Divide zoom level by this to get base scale
+const PDF_EXPORT_MIN_SCALE = 1; // Minimum scale factor for PDF export (increased for better label readability)
+const PDF_EXPORT_MAX_SCALE = 3; // Maximum scale factor for PDF export (increased for crisp text)
+const PDF_EXPORT_ZOOM_DIVISOR = 3; // Divide zoom level by this to get base scale (adjusted for better quality)
 
 // Clear origin field
 function clearOrigin() {
@@ -961,6 +1074,34 @@ function openPdfExportModal() {
   // Sync export content with the export type from Export/Import section
   pdfOptions.value.exportContent = exportType.value;
   showPdfExportModal.value = true;
+}
+
+// Ensure MapTiler vector tiles are used for vector PDF export when API key is available
+async function ensureMapTilerForVectorExport() {
+  // Only enable vector tiles if user explicitly requested it
+  if (!pdfOptions.value.useVectorBasemap) {
+    return false;
+  }
+  
+  try {
+    const maptilerKey = config.public.maptilerApiKey;
+    if (maptilerKey && maptilerKey !== 'get_your_free_key_at_https://maptiler.com' && maptilerKey.length > 10) {
+      // Enable vector tiles and force MapTiler provider
+      useVectorTiles.value = true;
+      // Prefer not to include a raster basemap when full vector tiles are available
+      pdfOptions.value.includeBasemap = false;
+      await toggleVectorTiles();
+      // Wait a bit for tiles/style to settle
+      await new Promise(resolve => setTimeout(resolve, 300));
+      if (useVectorTiles.value && vectorTileProvider.value) {
+        showStatus('✨ Using MapTiler vector tiles for vector PDF export', 'success');
+        return true;
+      }
+    }
+  } catch (e) {
+    // ignore and fall back
+  }
+  return false;
 }
 
 // Debounce helper
@@ -2170,12 +2311,90 @@ function importGPX(file: File) {
   reader.readAsText(file);
 }
 
-// PDF Map Export
+// SVG Vector Export Helper
+function generateSvgFromFeatures(width: number, height: number): SVGSVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  svg.setAttribute('width', width.toString());
+  svg.setAttribute('height', height.toString());
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  
+  // Create defs for markers if needed
+  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  svg.appendChild(defs);
+  
+  return svg;
+}
+
+function addRouteToSvg(svg: SVGSVGElement, coordinates: number[][], color: string, width: number = 4) {
+  if (!map || coordinates.length < 2) return;
+  
+  const pathData: string[] = [];
+  coordinates.forEach((coord, index) => {
+    const pixel = map!.getPixelFromCoordinate(fromLonLat(coord));
+    if (pixel) {
+      const command = index === 0 ? 'M' : 'L';
+      pathData.push(`${command} ${pixel[0]} ${pixel[1]}`);
+    }
+  });
+  
+  if (pathData.length > 0) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', pathData.join(' '));
+    path.setAttribute('stroke', color);
+    path.setAttribute('stroke-width', width.toString());
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(path);
+  }
+}
+
+function addPlaceToSvg(svg: SVGSVGElement, lon: number, lat: number, name: string, color: string, radius: number = 8) {
+  if (!map) return;
+  
+  const pixel = map.getPixelFromCoordinate(fromLonLat([lon, lat]));
+  if (!pixel) return;
+  
+  // Add circle marker
+  const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  circle.setAttribute('cx', pixel[0].toString());
+  circle.setAttribute('cy', pixel[1].toString());
+  circle.setAttribute('r', radius.toString());
+  circle.setAttribute('fill', color);
+  circle.setAttribute('stroke', '#ffffff');
+  circle.setAttribute('stroke-width', '2');
+  svg.appendChild(circle);
+  
+  // Add text label
+  const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  text.setAttribute('x', pixel[0].toString());
+  text.setAttribute('y', (pixel[1] - radius - 8).toString());
+  text.setAttribute('text-anchor', 'middle');
+  text.setAttribute('font-family', 'Arial, sans-serif');
+  text.setAttribute('font-size', '14');
+  text.setAttribute('font-weight', 'bold');
+  text.setAttribute('fill', '#1e293b');
+  text.setAttribute('stroke', '#ffffff');
+  text.setAttribute('stroke-width', '3');
+  text.setAttribute('paint-order', 'stroke');
+  text.textContent = name;
+  svg.appendChild(text);
+}
+
+// PDF Map Export with Vector Support
 async function exportPdfMap() {
   if (!map) return;
   
   showPdfExportModal.value = false;
   showStatus('Generating PDF...', 'success');
+  
+  // Check if vector export is requested
+  if (pdfOptions.value.vectorExport) {
+    // If MapTiler key is available, ensure MapTiler vector tiles are enabled
+    await ensureMapTilerForVectorExport();
+    return;
+  }
   
   try {
     // Save current view state
@@ -2309,11 +2528,22 @@ async function exportPdfMap() {
     // Use zoom-based scaling: higher zoom = higher resolution for text clarity
     const exportCanvas = document.createElement('canvas');
     const currentZoom = map.getView().getZoom() || 10;
-    // Scale factor: base min scale, up to max scale for high zoom levels (street level)
-    const scale = Math.min(PDF_EXPORT_MAX_SCALE, Math.max(PDF_EXPORT_MIN_SCALE, Math.floor(currentZoom / PDF_EXPORT_ZOOM_DIVISOR)));
+    
+    // Enhanced scale calculation for better text readability
+    // Base scale increases with zoom level, ensuring labels are always crisp
+    let scale = Math.min(PDF_EXPORT_MAX_SCALE, Math.max(PDF_EXPORT_MIN_SCALE, Math.ceil(currentZoom / PDF_EXPORT_ZOOM_DIVISOR)));
+    
+    // Apply device pixel ratio for even better quality on high-DPI displays
+    const dpr = window.devicePixelRatio || 1;
+    scale = scale * Math.min(dpr, 2); // Cap DPR contribution at 2x to avoid excessive file sizes
+    
     exportCanvas.width = mapCanvas.width * scale;
     exportCanvas.height = mapCanvas.height * scale;
-    const ctx = exportCanvas.getContext('2d');
+    const ctx = exportCanvas.getContext('2d', { 
+      alpha: false, // Disable alpha for better performance and smaller file size
+      willReadFrequently: false 
+    });
+    
     if (!ctx) {
       // Restore features before showing error
       originalMarkersState.forEach(f => markersSource?.addFeature(f));
@@ -2327,6 +2557,10 @@ async function exportPdfMap() {
       showStatus('Could not create export canvas', 'error');
       return;
     }
+    
+    // Enable image smoothing for better quality
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     
     // Draw the map canvas onto the export canvas with scaling
     ctx.scale(scale, scale);
@@ -2479,7 +2713,10 @@ async function exportPdfMap() {
     // Add date
     pdf.setFontSize(8);
     pdf.setFont('helvetica', 'normal');
-    pdf.text(`Generated: ${new Date().toLocaleDateString()}`, pageWidth - margin, pageHeight - margin, { align: 'right' });
+    pdf.text(`Generated with ronBureau by ${auth.user?.userId ?? 'unknown user'} on ${new Date().toLocaleDateString()}`, pageWidth - margin, pageHeight - margin, { align: 'right' });
+    // Credits required by OpenStreetMap license
+    const creditsText = 'Map data © OpenStreetMap contributors — https://osmfoundation.org/Licence';
+    pdf.text(creditsText, margin, pageHeight - margin, { align: 'left' });
     
     // Restore hidden features
     originalMarkersState.forEach((f) => {
@@ -2505,6 +2742,302 @@ async function exportPdfMap() {
   } catch (error) {
     console.error('PDF export failed:', error);
     showStatus('Failed to export PDF', 'error');
+  }
+}
+
+// Vector PDF Export (SVG → PDF)
+async function exportVectorPdfMap() {
+  if (!map) return;
+  
+  try {
+    // Save current view state
+    const originalCenter = map.getView().getCenter();
+    const originalZoom = map.getView().getZoom();
+    
+    // Auto-scale logic (same as raster export)
+    if (pdfOptions.value.scale === 'auto') {
+      const extents: number[][] = [];
+      
+      if (pdfOptions.value.exportContent !== 'routes' && markersSource) {
+        const placeFeatures = markersSource.getFeatures().filter(f => f.get('type') === 'place');
+        if (placeFeatures.length > 0) {
+          placeFeatures.forEach(f => {
+            const geom = f.getGeometry();
+            if (geom) extents.push(geom.getExtent());
+          });
+        }
+      }
+      
+      if (pdfOptions.value.exportContent !== 'places' && routeSource) {
+        const routeFeatures = routeSource.getFeatures();
+        if (routeFeatures.length > 0) {
+          routeFeatures.forEach(f => {
+            const geom = f.getGeometry();
+            if (geom) extents.push(geom.getExtent());
+          });
+        }
+      }
+      
+      if (extents.length > 0) {
+        let combinedExtent = extents[0].slice();
+        for (let i = 1; i < extents.length; i++) {
+          combinedExtent[0] = Math.min(combinedExtent[0], extents[i][0]);
+          combinedExtent[1] = Math.min(combinedExtent[1], extents[i][1]);
+          combinedExtent[2] = Math.max(combinedExtent[2], extents[i][2]);
+          combinedExtent[3] = Math.max(combinedExtent[3], extents[i][3]);
+        }
+        
+        const extentWidth = combinedExtent[2] - combinedExtent[0];
+        const extentHeight = combinedExtent[3] - combinedExtent[1];
+        
+        if (extentWidth < 1000 || extentHeight < 1000) {
+          const minSize = 5000;
+          const expandX = Math.max(0, (minSize - extentWidth) / 2);
+          const expandY = Math.max(0, (minSize - extentHeight) / 2);
+          combinedExtent[0] -= expandX;
+          combinedExtent[1] -= expandY;
+          combinedExtent[2] += expandX;
+          combinedExtent[3] += expandY;
+        }
+        
+        map.getView().fit(combinedExtent, { padding: [80, 80, 80, 80], maxZoom: 18 });
+        await new Promise(resolve => setTimeout(resolve, 500));
+        map.renderSync();
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+    }
+    
+    // Get map size
+    const mapSize = map.getSize();
+    if (!mapSize) {
+      showStatus('Could not get map size', 'error');
+      return;
+    }
+    
+    const [mapWidth, mapHeight] = mapSize;
+    // If user requested a fully vector basemap (no raster) ensure vector tiles are available.
+    if (!pdfOptions.value.includeBasemap) {
+      // Try to enable MapTiler vector tiles (or existing vector provider)
+      const ok = await ensureMapTilerForVectorExport();
+      if (!ok && (!useVectorTiles.value || !vectorTileProvider.value)) {
+        // Could not enable vector basemap — fallback to raster basemap to avoid exporting empty basemap
+        pdfOptions.value.includeBasemap = true;
+        showStatus('MapTiler/OpenFreeMap vector tiles unavailable — falling back to raster basemap for PDF export', 'error');
+      }
+    }
+    
+    // Create SVG
+    const svg = generateSvgFromFeatures(mapWidth, mapHeight);
+    
+    // Optionally add basemap as raster background
+    if (pdfOptions.value.includeBasemap) {
+      const mapCanvas = map.getViewport().querySelector('canvas') as HTMLCanvasElement;
+      if (mapCanvas) {
+        const imgData = mapCanvas.toDataURL('image/png');
+        const image = document.createElementNS('http://www.w3.org/2000/svg', 'image');
+        image.setAttribute('href', imgData);
+        image.setAttribute('x', '0');
+        image.setAttribute('y', '0');
+        image.setAttribute('width', mapWidth.toString());
+        image.setAttribute('height', mapHeight.toString());
+        svg.insertBefore(image, svg.firstChild);
+      }
+    }
+    
+    // Add routes to SVG
+    if (pdfOptions.value.exportContent !== 'places') {
+      // Add saved routes
+      savedRoutes.value.forEach((route) => {
+        if (route.coordinates.length > 0) {
+          addRouteToSvg(svg, route.coordinates, customization.value.routeColor, 4);
+        }
+      });
+      
+      // Add current route
+      if (currentRouteCoordinates.value.length > 0) {
+        addRouteToSvg(svg, currentRouteCoordinates.value, customization.value.routeColor, 4);
+      }
+    }
+    
+    // Add places to SVG
+    if (pdfOptions.value.exportContent !== 'routes') {
+      savedPlaces.value.forEach((place) => {
+        addPlaceToSvg(svg, place.lon, place.lat, place.name, place.color || customization.value.placeMarkerColor, 8);
+      });
+    }
+    
+    // Add direction markers (origin, destination, stops)
+    if (pdfOptions.value.exportContent !== 'places') {
+      if (origin.value) {
+        addPlaceToSvg(svg, origin.value.lon, origin.value.lat, 'A', '#22c55e', 10);
+      }
+      if (destination.value) {
+        addPlaceToSvg(svg, destination.value.lon, destination.value.lat, 'B', '#ef4444', 10);
+      }
+      stops.value.forEach((stop, index) => {
+        addPlaceToSvg(svg, stop.lon, stop.lat, (index + 1).toString(), '#f59e0b', 10);
+      });
+    }
+    
+    // Create PDF
+    const pdf = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: pdfOptions.value.pageSize,
+    });
+    
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 10;
+    
+    // Add title
+    if (pdfOptions.value.title) {
+      pdf.setFontSize(pdfOptions.value.pageSize === 'a3' ? 20 : 16);
+      pdf.setFont('helvetica', 'bold');
+      pdf.text(pdfOptions.value.title, pageWidth / 2, margin + 5, { align: 'center' });
+    }
+    
+    // Calculate map area
+    const titleHeight = pdfOptions.value.title ? (pdfOptions.value.pageSize === 'a3' ? 18 : 15) : 0;
+    const legendHeight = pdfOptions.value.showLegend ? (pdfOptions.value.pageSize === 'a3' ? 25 : 20) : 0;
+    const mapTop = margin + titleHeight;
+    const availableWidth = pageWidth - margin * 2;
+    const availableHeight = pageHeight - margin * 2 - titleHeight - legendHeight;
+    
+    // Calculate SVG scale to fit in PDF
+    const svgAspect = mapWidth / mapHeight;
+    let pdfMapWidth = availableWidth;
+    let pdfMapHeight = availableWidth / svgAspect;
+    
+    if (pdfMapHeight > availableHeight) {
+      pdfMapHeight = availableHeight;
+      pdfMapWidth = availableHeight * svgAspect;
+    }
+    
+    const mapLeft = margin + (availableWidth - pdfMapWidth) / 2;
+    
+    // Convert SVG to PDF using svg2pdf
+    document.body.appendChild(svg);
+    await svg2pdf(svg, pdf, {
+      x: mapLeft,
+      y: mapTop,
+      width: pdfMapWidth,
+      height: pdfMapHeight,
+    });
+    document.body.removeChild(svg);
+    
+    // Add north pointer
+    if (pdfOptions.value.showNorthPointer) {
+      const npX = mapLeft + pdfMapWidth - 10;
+      const npY = mapTop + 10;
+      pdf.setFillColor(255, 255, 255);
+      pdf.circle(npX, npY, 5, 'F');
+      pdf.setDrawColor(0, 0, 0);
+      pdf.circle(npX, npY, 5, 'S');
+      pdf.setFontSize(8);
+      pdf.setFont('helvetica', 'bold');
+      pdf.text('N', npX, npY + 1, { align: 'center' });
+      pdf.setLineWidth(0.5);
+      pdf.line(npX, npY - 7, npX, npY - 3);
+      pdf.line(npX - 2, npY - 5, npX, npY - 7);
+      pdf.line(npX + 2, npY - 5, npX, npY - 7);
+    }
+    
+    // Add scale bar (simplified for vector export)
+    if (pdfOptions.value.showScaleBar) {
+      const view = map.getView();
+      const resolution = view.getResolution();
+      if (resolution && resolution > 0) {
+        const center = view.getCenter();
+        if (center) {
+          const centerLonLat = toLonLat(center);
+          const pixelDistance = 100;
+          const offsetPoint = toLonLat([center[0] + resolution * pixelDistance, center[1]]);
+          const distanceFor100px = getDistance(centerLonLat, offsetPoint);
+          
+          const niceScaleValues = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000];
+          let selectedScale = niceScaleValues[0];
+          
+          for (const niceValue of niceScaleValues) {
+            const pixelsNeeded = (niceValue / distanceFor100px) * pixelDistance;
+            if (pixelsNeeded >= 50 && pixelsNeeded <= 200) {
+              selectedScale = niceValue;
+              break;
+            }
+          }
+          
+          let scaleLabel: string;
+          if (selectedScale >= 1000) {
+            scaleLabel = `${selectedScale / 1000} km`;
+          } else {
+            scaleLabel = `${selectedScale} m`;
+          }
+          
+          const sbX = mapLeft + 5;
+          const sbY = mapTop + pdfMapHeight - 5;
+          const sbWidth = 30;
+          
+          pdf.setFillColor(255, 255, 255);
+          pdf.rect(sbX - 2, sbY - 5, sbWidth + 4, 8, 'F');
+          pdf.setDrawColor(0, 0, 0);
+          pdf.setLineWidth(0.5);
+          pdf.line(sbX, sbY, sbX + sbWidth, sbY);
+          pdf.line(sbX, sbY - 2, sbX, sbY);
+          pdf.line(sbX + sbWidth, sbY - 2, sbX + sbWidth, sbY);
+          pdf.setFontSize(7);
+          pdf.setFont('helvetica', 'normal');
+          pdf.text(scaleLabel, sbX + sbWidth / 2, sbY - 2, { align: 'center' });
+        }
+      }
+    }
+    
+    // Add legend
+    if (pdfOptions.value.showLegend) {
+      const legendY = pageHeight - margin - legendHeight + 5;
+      pdf.setFontSize(pdfOptions.value.pageSize === 'a3' ? 12 : 10);
+      pdf.setFont('helvetica', 'bold');
+      pdf.text('Legend:', margin, legendY);
+      
+      let legendX = margin + 25;
+      pdf.setFontSize(pdfOptions.value.pageSize === 'a3' ? 10 : 8);
+      pdf.setFont('helvetica', 'normal');
+      
+      const showPlaces = (pdfOptions.value.exportContent === 'both' || pdfOptions.value.exportContent === 'places') && savedPlaces.value.length > 0;
+      const showRoutes = (pdfOptions.value.exportContent === 'both' || pdfOptions.value.exportContent === 'routes') && (savedRoutes.value.length > 0 || currentRouteCoordinates.value.length > 0);
+      
+      if (showPlaces) {
+        pdf.setFillColor(239, 68, 68);
+        pdf.circle(legendX, legendY - 1, 2, 'F');
+        pdf.text('Places', legendX + 5, legendY);
+        legendX += 35;
+      }
+      
+      if (showRoutes) {
+        pdf.setDrawColor(34, 197, 94);
+        pdf.setLineWidth(1);
+        pdf.line(legendX, legendY - 1, legendX + 10, legendY - 1);
+        pdf.text('Routes', legendX + 15, legendY);
+      }
+    }
+    
+    // Add credits
+    pdf.setFontSize(8);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text(`Generated with ronBureau by ${auth.user?.userId ?? 'unknown user'} on ${new Date().toLocaleDateString()}`, pageWidth - margin, pageHeight - margin, { align: 'right' });
+    const creditsText = 'Map data © OpenStreetMap contributors — https://osmfoundation.org/Licence';
+    pdf.text(creditsText, margin, pageHeight - margin, { align: 'left' });
+    
+    // Restore view if modified
+    if (pdfOptions.value.scale === 'auto' && originalCenter && originalZoom) {
+      map.getView().setCenter(originalCenter);
+      map.getView().setZoom(originalZoom);
+    }
+    
+    pdf.save(`map-vector-${new Date().toISOString().split('T')[0]}.pdf`);
+    showStatus('Vector PDF exported successfully!', 'success');
+  } catch (error) {
+    console.error('Vector PDF export failed:', error);
+    showStatus('Failed to export vector PDF', 'error');
   }
 }
 
@@ -2675,6 +3208,87 @@ function handleMapClick(event: { coordinate: number[] }) {
       saveToLocalStorage();
       showStatus('Place added!', 'success');
     });
+  }
+}
+
+// Switch MapTiler style
+async function switchMapTilerStyle() {
+  if (vectorTileProvider.value === 'maptiler' && useVectorTiles.value && map) {
+    // Remove existing vector tile layer
+    const layers = map.getLayers();
+    if (vectorTileLayer) {
+      layers.remove(vectorTileLayer);
+      vectorTileLayer = null;
+    }
+    // Reload vector tiles with new style
+    await toggleVectorTiles();
+  }
+}
+
+// Toggle between raster and vector tiles
+async function toggleVectorTiles() {
+  if (!map) return;
+  
+  const layers = map.getLayers();
+  
+  if (useVectorTiles.value) {
+    // Switch to vector tiles
+    if (!vectorTileLayer) {
+      showStatus('Loading vector tiles...', 'success');
+      
+      try {
+        // Try MapTiler first if API key is available
+        const maptilerKey = config.public.maptilerApiKey;
+        
+        if (maptilerKey && maptilerKey !== 'get_your_free_key_at_https://maptiler.com' && maptilerKey.length > 10) {
+          // Use MapTiler vector tiles (high quality, with labels)
+          vectorTileLayer = new VectorTileLayer({
+            declutter: true,
+            source: new VectorTileSource({
+              format: new MVT(),
+              url: `https://api.maptiler.com/tiles/v3/{z}/{x}/{y}.pbf?key=${maptilerKey}`,
+              maxZoom: 14,
+            }),
+          });
+          
+          // Apply selected MapTiler style
+          const styleUrl = `https://api.maptiler.com/maps/${maptilerStyle.value}/style.json?key=${maptilerKey}`;
+          await applyStyle(vectorTileLayer, styleUrl);
+          vectorTileProvider.value = 'maptiler';
+          const selectedStyle = maptilerStyles.find(s => s.id === maptilerStyle.value);
+          showStatus(`✨ ${selectedStyle?.name || 'MapTiler'} style loaded`, 'success');
+        } else {
+          // Fallback to OpenFreeMap (free, no key required)
+          vectorTileLayer = new VectorTileLayer({
+            declutter: true,
+            source: new VectorTileSource({
+              format: new MVT(),
+              url: 'https://tiles.openfreemap.org/planet/{z}/{x}/{y}.pbf',
+              maxZoom: 14,
+            }),
+          });
+          
+          // Apply OpenFreeMap Liberty style
+          const styleUrl = 'https://tiles.openfreemap.org/styles/liberty';
+          await applyStyle(vectorTileLayer, styleUrl);
+          vectorTileProvider.value = 'openfreemap';
+          showStatus('🌍 Vector tiles loaded (OpenFreeMap - Free)', 'success');
+        }
+      } catch (error) {
+        console.error('Failed to load vector tiles:', error);
+        showStatus('Failed to load vector tiles, using raster', 'error');
+        useVectorTiles.value = false;
+        vectorTileProvider.value = null;
+        return;
+      }
+    }
+    
+    layers.setAt(0, vectorTileLayer);
+  } else {
+    // Switch back to raster tiles
+    layers.setAt(0, new TileLayer({ source: new OSM() }));
+    vectorTileProvider.value = null;
+    showStatus('Switched to raster tiles', 'success');
   }
 }
 
@@ -3147,6 +3761,59 @@ onUnmounted(() => {
 
 .location-btn {
   font-size: 0.75rem;
+}
+
+.vector-tiles-status {
+  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  width: fit-content;
+}
+
+.status-badge.premium {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde047 100%);
+  color: #854d0e;
+  border: 1px solid #fbbf24;
+}
+
+.status-badge.free {
+  background: linear-gradient(135deg, #dcfce7 0%, #86efac 100%);
+  color: #14532d;
+  border: 1px solid #22c55e;
+}
+
+.sidebar-style-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.sidebar-style-selector label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.sidebar-style-selector .select {
+  flex: 1;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
 }
 
 .search-mode-toggle {
