@@ -10,9 +10,8 @@
             </button>
           </div>
           
-          <div v-if="vectorTilesAvailable || (useVectorTiles && vectorTileProvider)" class="vector-tiles-status">
             <!-- MapTiler Style Selector (visible when MapTiler key available) -->
-            <div v-if="vectorTilesAvailable" class="sidebar-style-selector">
+            <div class="sidebar-style-selector">
               <label for="maptiler-style">Map Style:</label>
               <select id="maptiler-style" v-model="maptilerStyle" @change="onMapStyleChange" class="select select-sm">
                 <option v-for="style in maptilerStyles" :key="style.id" :value="style.id">
@@ -20,7 +19,6 @@
                 </option>
               </select>
             </div>
-          </div>
 
           <!-- Search Mode Toggle -->
           <div class="search-mode-toggle">
@@ -411,14 +409,6 @@
             <button class="map-control-btn" @click="goToCurrentLocation" :disabled="isGettingLocation" title="My Location">
               📍
             </button>
-            <button 
-              class="map-control-btn" 
-              @click="useVectorTiles = !useVectorTiles; toggleVectorTiles()" 
-              :title="useVectorTiles ? 'Switch to Raster Tiles' : 'Switch to Vector Tiles'"
-              :class="{ 'active': useVectorTiles }"
-            >
-              {{ useVectorTiles ? '🗺️' : '🌐' }}
-            </button>
           </div>
         </div>
 
@@ -457,22 +447,7 @@
               <label><input type="checkbox" v-model="pdfOptions.showScaleBar" /> Show Scale Bar</label>
               <label><input type="checkbox" v-model="pdfOptions.showNorthPointer" /> Show North Pointer</label>
             </div>
-            <div class="checkbox-group">
-              <label><input type="checkbox" v-model="pdfOptions.vectorExport" /> <strong>🎯 Vector Export (SVG→PDF)</strong></label>
-              <p style="font-size: 0.85em; color: #64748b; margin: 0.25rem 0 0 1.5rem;">Higher quality, sharp text/lines at any zoom level</p>
-            </div>
-            <div v-if="pdfOptions.vectorExport" class="checkbox-group" style="margin-left: 1.5rem; padding-left: 1rem; border-left: 2px solid #e2e8f0;">
-              <div v-if="vectorTilesAvailable">
-                <label><input type="checkbox" v-model="pdfOptions.useVectorBasemap" /> <strong>Use vector basemap</strong> (⏱️ longer export time)</label>
-                <p style="font-size: 0.85em; color: #64748b; margin: 0.25rem 0 0 1.5rem;">
-                  {{ useVectorTiles && vectorTileProvider ? `Currently using ${vectorTileProvider === 'maptiler' ? 'MapTiler' : 'OpenFreeMap'} vector tiles` : 'Will enable MapTiler vector tiles for export' }}
-                </p>
-              </div>
-              <div v-if="!pdfOptions.useVectorBasemap">
-                <label style="margin-top: 0.5rem;"><input type="checkbox" v-model="pdfOptions.includeBasemap" /> Include Basemap (as raster)</label>
-                <p style="font-size: 0.85em; color: #64748b; margin: 0.25rem 0 0 1.5rem;">Places & routes will be vector, basemap will be raster</p>
-              </div>
-            </div>
+            <div v-if="pdfOptions.vectorExport" class="checkbox-group" style="margin-left: 1.5rem; padding-left: 1rem; border-left: 2px solid #e2e8f0;"></div>
             <div class="modal-buttons">
               <button class="btn btn-outline" @click="showPdfExportModal = false">Cancel</button>
               <button class="btn btn-primary" @click="exportPdfMap">Export PDF</button>
@@ -807,9 +782,7 @@ const pdfOptions = ref({
   showLegend: true,
   showScaleBar: true,
   showNorthPointer: true,
-  vectorExport: false, // New: use SVG vector export instead of raster
   includeBasemap: true, // New: include basemap in vector export (as raster)
-  useVectorBasemap: false, // New: user choice to use vector basemap (longer export time)
 });
 
 // Vector tiles state
@@ -1066,34 +1039,6 @@ function openPdfExportModal() {
   // Sync export content with the export type from Export/Import section
   pdfOptions.value.exportContent = exportType.value;
   showPdfExportModal.value = true;
-}
-
-// Ensure MapTiler vector tiles are used for vector PDF export when API key is available
-async function ensureMapTilerForVectorExport() {
-  // Only enable vector tiles if user explicitly requested it
-  if (!pdfOptions.value.useVectorBasemap) {
-    return false;
-  }
-  
-  try {
-    const maptilerKey = config.public.maptilerApiKey;
-    if (maptilerKey && maptilerKey !== 'get_your_free_key_at_https://maptiler.com' && maptilerKey.length > 10) {
-      // Enable vector tiles and force MapTiler provider
-      useVectorTiles.value = true;
-      // Prefer not to include a raster basemap when full vector tiles are available
-      pdfOptions.value.includeBasemap = false;
-      await toggleVectorTiles();
-      // Wait a bit for tiles/style to settle
-      await new Promise(resolve => setTimeout(resolve, 300));
-      if (useVectorTiles.value && vectorTileProvider.value) {
-        showStatus('✨ Using MapTiler vector tiles for vector PDF export', 'success');
-        return true;
-      }
-    }
-  } catch (e) {
-    // ignore and fall back
-  }
-  return false;
 }
 
 // Debounce helper
@@ -2412,39 +2357,90 @@ function addPdfDecorations(
       const center = view.getCenter();
       if (center) {
         const centerLonLat = toLonLat(center);
-        const pixelDistance = 100;
-        const offsetPoint = toLonLat([center[0] + resolution * pixelDistance, center[1]]);
+        const offsetPoint = toLonLat([center[0] + resolution * 100, center[1]]);
         const distanceFor100px = getDistance(centerLonLat, offsetPoint);
-        
+
+        // Guard: ensure distanceFor100px is valid
+        if (!isFinite(distanceFor100px) || distanceFor100px <= 0) return;
+
         const niceScaleValues = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000];
-        let selectedScale = niceScaleValues[0];
-        
-        for (const niceValue of niceScaleValues) {
-          const pixelsNeeded = (niceValue / distanceFor100px) * pixelDistance;
-          if (pixelsNeeded >= 50 && pixelsNeeded <= 200) {
-            selectedScale = niceValue;
-            break;
+
+        // choose scale that best matches a target pixel length (prefer around 100px)
+        const targetPx = 100;
+        const pixelsMap = niceScaleValues.map(v => ({
+          value: v,
+          px: (v / distanceFor100px) * 100
+        })).filter(x => isFinite(x.px) && x.px > 0);
+
+        if (pixelsMap.length === 0) return;
+
+        // find best initial candidate minimizing distance to targetPx
+        pixelsMap.sort((a, b) => Math.abs(a.px - targetPx) - Math.abs(b.px - targetPx));
+        let selectedScale = pixelsMap[0].value;
+
+        // If selected pixel width is out of visible range, try to pick one inside acceptable bounds
+        const minVisiblePx = 30;
+        const maxVisiblePx = Math.min(200, (typeof mapWidth === 'number' ? Math.max(20, mapWidth - 20) : 200));
+        let pixelsForSelected = (selectedScale / distanceFor100px) * 100;
+
+        if (pixelsForSelected < minVisiblePx) {
+          // try larger scales to increase pixel width
+          for (const candidate of pixelsMap) {
+            if (candidate.px >= minVisiblePx) {
+              selectedScale = candidate.value;
+              pixelsForSelected = candidate.px;
+              break;
+            }
+          }
+        } else if (pixelsForSelected > maxVisiblePx) {
+          // try smaller scales to fit
+          for (let i = pixelsMap.length - 1; i >= 0; i--) {
+            const candidate = pixelsMap[i];
+            if (candidate.px <= maxVisiblePx) {
+              selectedScale = candidate.value;
+              pixelsForSelected = candidate.px;
+              break;
+            }
           }
         }
-        
-        const scaleLabel = selectedScale >= 1000 
-          ? `${selectedScale / 1000} km` 
+
+        const scaleLabel = selectedScale >= 1000
+          ? `${selectedScale / 1000} km`
           : `${selectedScale} m`;
-        
+
         const sbX = mapLeft + 5;
         const sbY = mapTop + mapHeight - 5;
-        const sbWidth = 30;
-        
+
+        // compute/refresh pixel width for the selected scale (based on distanceFor100px)
+        pixelsForSelected = (selectedScale / distanceFor100px) * 100;
+        // clamp width to available map width and bounds
+        const maxAllowed = (typeof mapWidth === 'number' && mapWidth > 40) ? Math.min(200, Math.max(20, mapWidth - 20)) : 200;
+        let sbWidth = Math.round(Math.min(Math.max(pixelsForSelected, 0), maxAllowed));
+
+        // If resulting bar would be too small to be reliable, skip drawing the scale
+        if (sbWidth < 8) return;
+
+        // background for scale area
         pdf.setFillColor(255, 255, 255);
         pdf.rect(sbX - 2, sbY - 5, sbWidth + 4, 8, 'F');
+
+        // draw two-part (black / white) scale bar above the baseline
+        const half = Math.round(sbWidth / 2);
+        pdf.setFillColor(0, 0, 0);
+        pdf.rect(sbX, sbY - 2, half, 2, 'F');
+        pdf.setFillColor(255, 255, 255);
+        pdf.rect(sbX + half, sbY - 2, sbWidth - half, 2, 'F');
+
+        // outline and end ticks
         pdf.setDrawColor(0, 0, 0);
         pdf.setLineWidth(0.5);
         pdf.line(sbX, sbY, sbX + sbWidth, sbY);
         pdf.line(sbX, sbY - 2, sbX, sbY);
         pdf.line(sbX + sbWidth, sbY - 2, sbX + sbWidth, sbY);
+
         pdf.setFontSize(7);
         pdf.setFont('helvetica', 'normal');
-        pdf.text(scaleLabel, sbX + sbWidth / 2, sbY - 2, { align: 'center' });
+        pdf.text(scaleLabel, sbX + sbWidth / 2, sbY - 4, { align: 'center' });
       }
     }
   }
