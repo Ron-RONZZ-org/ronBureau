@@ -302,22 +302,27 @@
               <h3>📌 Places</h3>
               <button class="btn btn-outline btn-sm" @click="clearAllPlaces" :disabled="savedPlaces.length === 0">Clear All</button>
             </div>
-            <div v-if="savedPlaces.length === 0" class="no-saved">
-              <p>No saved places yet</p>
-            </div>
-            <div v-else class="saved-list">
-              <div
-                v-for="(place, index) in savedPlaces"
-                :key="place.id || index"
-                class="saved-item"
-                @click="goToPlace(place)"
-              >
-                <span class="saved-icon" :style="{ color: place.color || customization.placeMarkerColor }">{{ place.icon || '📍' }}</span>
-                <span class="saved-name">{{ place.name }}</span>
-                <button class="edit-btn" @click.stop="editPlace(place, index)" title="Edit place">✏️</button>
-                <button class="remove-btn" @click.stop="removePlace(index)">×</button>
+            <ClientOnly>
+              <div v-if="savedPlaces.length === 0" class="no-saved">
+                <p>No saved places yet</p>
               </div>
-            </div>
+              <div v-else class="saved-list">
+                <div
+                  v-for="(place, index) in savedPlaces"
+                  :key="place.id || index"
+                  class="saved-item"
+                  @click="goToPlace(place)"
+                >
+                  <span class="saved-icon" :style="{ color: place.color || customization.placeMarkerColor }">{{ place.icon || '📍' }}</span>
+                  <span class="saved-name">{{ place.name }}</span>
+                  <button class="edit-btn" @click.stop="editPlace(place, index)" title="Edit place">✏️</button>
+                  <button class="remove-btn" @click.stop="removePlace(index)">×</button>
+                </div>
+              </div>
+              <template #fallback>
+                <div class="no-saved"><p>Loading places...</p></div>
+              </template>
+            </ClientOnly>
             <!-- Manage Lists Button -->
             <button class="btn btn-outline btn-sm w-full mt-2" @click="showPlaceListsModal = true">
               📋 Manage Lists
@@ -330,22 +335,27 @@
               <h3>🛤️ Routes</h3>
               <button class="btn btn-outline btn-sm" @click="clearAllRoutes" :disabled="savedRoutes.length === 0">Clear All</button>
             </div>
-            <div v-if="savedRoutes.length === 0" class="no-saved">
-              <p>No saved routes yet</p>
-            </div>
-            <div v-else class="saved-list">
-              <div
-                v-for="(route, index) in savedRoutes"
-                :key="route.id || index"
-                class="saved-item"
-                @click="loadRoute(route)"
-              >
-                <span class="saved-icon">🛤️</span>
-                <span class="saved-name">{{ route.name }}</span>
-                <button class="edit-btn" @click.stop="editRoute(route, index)" title="Edit route">✏️</button>
-                <button class="remove-btn" @click.stop="removeRoute(index)">×</button>
+            <ClientOnly>
+              <div v-if="savedRoutes.length === 0" class="no-saved">
+                <p>No saved routes yet</p>
               </div>
-            </div>
+              <div v-else class="saved-list">
+                <div
+                  v-for="(route, index) in savedRoutes"
+                  :key="route.id || index"
+                  class="saved-item"
+                  @click="loadRoute(route)"
+                >
+                  <span class="saved-icon">🛤️</span>
+                  <span class="saved-name">{{ route.name }}</span>
+                  <button class="edit-btn" @click.stop="editRoute(route, index)" title="Edit route">✏️</button>
+                  <button class="remove-btn" @click.stop="removeRoute(index)">×</button>
+                </div>
+              </div>
+              <template #fallback>
+                <div class="no-saved"><p>Loading routes...</p></div>
+              </template>
+            </ClientOnly>
             <!-- Manage Lists Button -->
             <button class="btn btn-outline btn-sm w-full mt-2" @click="showRouteListsModal = true">
               📋 Manage Lists
@@ -385,14 +395,16 @@
               <h3>🎨 Customization</h3>
               <button class="btn btn-outline btn-sm" @click="showPreferencesModal = true" title="Open preferences">⚙️</button>
             </div>
-            <div class="color-option">
-              <label>Place Marker Color:</label>
-              <input type="color" v-model="customization.placeMarkerColor" @change="updateMarkerColors" />
-            </div>
-            <div class="color-option">
-              <label>Route Color:</label>
-              <input type="color" v-model="customization.routeColor" @change="updateRouteColor" />
-            </div>
+            <ClientOnly>
+              <div class="color-option">
+                <label>Place Marker Color:</label>
+                <input type="color" v-model="customization.placeMarkerColor" @change="updateMarkerColors" />
+              </div>
+              <div class="color-option">
+                <label>Route Color:</label>
+                <input type="color" v-model="customization.routeColor" @change="updateRouteColor" />
+              </div>
+            </ClientOnly>
           </div>
 
           <!-- Status Message -->
