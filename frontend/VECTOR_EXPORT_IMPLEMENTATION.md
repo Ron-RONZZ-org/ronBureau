@@ -11,30 +11,32 @@ This implementation adds **FULL vector tile basemap support** (with MapTiler or 
   - Roads, buildings, labels, POIs, terrain
   - Multiple style options (basic, streets, outdoor, satellite)
   - 100,000 tile loads/month FREE tier
+  - **Auto-enabled** when API key is configured
 - **OpenFreeMap (Free Fallback)**: No API key required
   - Automatic fallback if MapTiler key not configured
   - Liberty style with complete OSM coverage
   - Unlimited, free usage
 - **Smart Provider Selection**: Automatically chooses best available option
-- **Status Indicators**: Visual badges show active provider
+- **Style Selector**: Pure map style selector in sidebar (replaces raster/vector toggle)
 
 ### 2. Vector Tiles Integration
 - **Complete Basemap**: Not just overlays — full vector rendering of all map elements
-- **Toggle Control**: UI button to switch between raster (standard OSM) and vector tiles
+- **Map Style Selector**: UI dropdown to switch between MapTiler styles
 - **Dynamic Layer Switching**: Seamless switching without page reload
 - **MVT Format**: Uses Mapbox Vector Tiles with OpenLayers + ol-mapbox-style
 
-### 2. SVG-Based Vector PDF Export
+### 3. SVG-Based Vector PDF Export
 - **Pure Vector Output**: Places and routes are exported as true vector graphics (SVG → PDF)
 - **Crisp Text**: Labels remain sharp at any zoom level or print size
 - **Hybrid Mode**: Optional basemap inclusion (raster background + vector overlay)
 - **Full Feature Support**: All existing PDF features (legend, scale bar, north pointer) preserved
+- **Optimized File Size**: JPEG compression (0.85 quality) for basemap images
 
-### 3. Enhanced PDF Export Options
+### 4. Enhanced PDF Export Options
 - **Vector Export Toggle**: Checkbox to enable SVG→PDF vector export
 - **Basemap Control**: Option to include/exclude basemap in vector exports
 - **Quality Settings**: Same scale, page size, and content options as before
-- **Dual Export Modes**: Choice between traditional high-res raster or new vector export
+- **Unified Export Logic**: Shared helper functions reduce code duplication
 
 ## 🔧 Technical Implementation
 
@@ -238,14 +240,16 @@ const vectorTileSource = new VectorTileSource({
 ## ✅ Testing Checklist
 
 - [x] Vector tiles load correctly
-- [x] Toggle between raster and vector tiles works
-- [x] Vector PDF export generates valid PDF
+- [x] Map style selector works correctly
+- [x] Vector PDF export generates valid PDF (bug fixed: was returning early without calling exportVectorPdfMap)
 - [x] Labels are crisp and readable in vector PDF
 - [x] Routes render correctly as vector paths
+- [x] Places render correctly in vector PDF export
 - [x] Basemap inclusion option works
 - [x] Legend, scale bar, and north pointer appear correctly
+- [x] Dark theme compatibility for sidebar style selector
 - [x] No TypeScript errors
-- [x] No runtime console errors
+- [x] PDF file size optimized (JPEG compression 0.85)
 - [ ] Test with large number of places (100+)
 - [ ] Test with long routes (1000+ points)
 - [ ] Test on different browsers (Chrome, Firefox, Safari)
