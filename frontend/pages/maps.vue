@@ -2919,11 +2919,6 @@ async function onMapStyleChange() {
   }
 }
 
-// Legacy toggle function - kept for compatibility but now delegates to onMapStyleChange
-async function toggleVectorTiles() {
-  // This function is now deprecated - use onMapStyleChange instead
-  await onMapStyleChange();
-}
 
 // Initialize map
 onMounted(() => {
