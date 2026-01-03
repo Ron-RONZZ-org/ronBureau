@@ -1,6 +1,6 @@
 /**
  * Composable for making authenticated API requests
- * Automatically handles 401 errors and adds auth headers
+ * Automatically adds auth headers and validates token before requests
  */
 export const useApi = () => {
   const config = useRuntimeConfig();
@@ -23,21 +23,11 @@ export const useApi = () => {
       headers.Authorization = `Bearer ${authStore.token}`;
     }
 
-    try {
-      const response = await $fetch<T>(`${config.public.apiBase}${url}`, {
-        ...options,
-        headers,
-      });
-      return response;
-    } catch (error: any) {
-      // Handle 401 errors specifically
-      if (error.response?.status === 401 || error.status === 401) {
-        console.warn('Authentication failed. Logging out...');
-        authStore.logout();
-        throw new Error('Session expired. Please log in again.');
-      }
-      throw error;
-    }
+    // The global plugin will handle 401 errors, so we just make the request
+    return await $fetch<T>(`${config.public.apiBase}${url}`, {
+      ...options,
+      headers,
+    });
   };
 
   return {
