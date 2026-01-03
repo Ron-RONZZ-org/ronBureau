@@ -123,12 +123,22 @@ backup_database() {
             DB_NAME=$(echo "$DATABASE_URL" | sed -n 's/.*\/\([^?]*\).*/\1/p')
             
             if [ -n "$DB_NAME" ]; then
-                sudo -u postgres pg_dump "$DB_NAME" > "$BACKUP_FILE" 2>/dev/null || true
+                sudo -u postgres pg_dump "$DB_NAME" > "$BACKUP_FILE" 2>&1
                 if [ -f "$BACKUP_FILE" ] && [ -s "$BACKUP_FILE" ]; then
-                    print_success "Database backed up to: $BACKUP_FILE"
+                    # Check if backup file contains SQL data (not just error messages)
+                    if grep -q "PostgreSQL database dump" "$BACKUP_FILE" 2>/dev/null; then
+                        print_success "Database backed up to: $BACKUP_FILE"
+                    else
+                        print_error "Database backup failed - check credentials or database existence"
+                        rm -f "$BACKUP_FILE"
+                        print_info "Update will continue without backup. Press Ctrl+C to cancel or wait 5 seconds..."
+                        sleep 5
+                    fi
                 else
-                    print_info "Database backup skipped or failed"
+                    print_error "Database backup failed"
                     rm -f "$BACKUP_FILE"
+                    print_info "Update will continue without backup. Press Ctrl+C to cancel or wait 5 seconds..."
+                    sleep 5
                 fi
             else
                 print_info "Could not determine database name, skipping backup"
@@ -151,8 +161,14 @@ pull_changes() {
     print_info "Pulling latest changes from git..."
     cd "$APP_DIR"
     
-    # Stash any local changes
-    sudo -u "$APP_USER" git stash 2>/dev/null || true
+    # Check for local changes
+    if sudo -u "$APP_USER" git diff-index --quiet HEAD -- 2>/dev/null; then
+        print_info "No local changes detected"
+    else
+        print_info "Local changes detected - stashing them before pull"
+        sudo -u "$APP_USER" git stash
+        print_info "Local changes stashed. Use 'git stash pop' to restore them later"
+    fi
     
     # Pull changes
     sudo -u "$APP_USER" git pull
@@ -175,7 +191,21 @@ update_backend() {
     
     if [ "$SKIP_MIGRATION" = "no" ]; then
         print_info "Running database migrations..."
-        sudo -u "$APP_USER" npm run prisma:migrate deploy 2>/dev/null || sudo -u "$APP_USER" npm run prisma:migrate || true
+        # Try production migration first (prisma:migrate deploy)
+        if sudo -u "$APP_USER" npm run prisma:migrate deploy 2>/dev/null; then
+            print_success "Migrations applied successfully"
+        else
+            # Fall back to standard migration if deploy fails
+            print_info "Trying standard migration..."
+            if sudo -u "$APP_USER" npm run prisma:migrate; then
+                print_success "Migrations applied successfully"
+            else
+                print_error "Migration failed - update may be incomplete"
+                print_info "You may need to manually resolve migration issues"
+                print_info "Press Ctrl+C to stop or wait 10 seconds to continue..."
+                sleep 10
+            fi
+        fi
     fi
     
     print_info "Building backend..."
