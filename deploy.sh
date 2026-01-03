@@ -80,8 +80,20 @@ get_configuration() {
     read -sp "JWT Secret (leave empty to generate): " JWT_SECRET
     echo ""
     if [ -z "$JWT_SECRET" ]; then
-        JWT_SECRET=$(openssl rand -base64 32)
-        print_info "Generated JWT secret"
+        # Check if there's an existing .env file with JWT secret
+        if [ -f "$APP_DIR/backend/.env" ]; then
+            EXISTING_SECRET=$(grep "^JWT_SECRET=" "$APP_DIR/backend/.env" 2>/dev/null | cut -d'=' -f2- | tr -d '"')
+            if [ -n "$EXISTING_SECRET" ]; then
+                JWT_SECRET="$EXISTING_SECRET"
+                print_info "Using existing JWT secret from .env file"
+            else
+                JWT_SECRET=$(openssl rand -base64 32)
+                print_info "Generated new JWT secret"
+            fi
+        else
+            JWT_SECRET=$(openssl rand -base64 32)
+            print_info "Generated new JWT secret"
+        fi
     fi
     
     echo ""
@@ -115,7 +127,13 @@ install_nodejs() {
     if command -v node &> /dev/null; then
         print_info "Node.js is already installed ($(node -v))"
     else
-        curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+        # Use package manager instead of piping script to bash
+        apt-get install -y ca-certificates curl gnupg
+        mkdir -p /etc/apt/keyrings
+        curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+        NODE_MAJOR=18
+        echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list
+        apt-get update
         apt-get install -y nodejs
         print_success "Node.js installed ($(node -v))"
     fi
@@ -139,11 +157,21 @@ install_postgresql() {
 setup_database() {
     print_info "Setting up PostgreSQL database..."
     
+    # Create .pgpass file for secure password handling
+    PGPASS_FILE="/tmp/.pgpass_ronbureau_$$"
+    echo "localhost:5432:$DB_NAME:$DB_USER:$DB_PASSWORD" > "$PGPASS_FILE"
+    chmod 600 "$PGPASS_FILE"
+    
     # Create database and user
+    export PGPASSFILE="$PGPASS_FILE"
     sudo -u postgres psql -c "CREATE DATABASE $DB_NAME;" 2>/dev/null || true
     sudo -u postgres psql -c "CREATE USER $DB_USER WITH ENCRYPTED PASSWORD '$DB_PASSWORD';" 2>/dev/null || true
     sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE $DB_NAME TO $DB_USER;" 2>/dev/null || true
     sudo -u postgres psql -c "ALTER DATABASE $DB_NAME OWNER TO $DB_USER;" 2>/dev/null || true
+    
+    # Clean up temp file
+    rm -f "$PGPASS_FILE"
+    unset PGPASSFILE
     
     print_success "Database configured"
 }
