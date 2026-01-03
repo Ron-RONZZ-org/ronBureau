@@ -25,6 +25,8 @@ APP_USER="ronbureau"
 APP_DIR="/opt/ronbureau"
 DOMAIN=""
 EMAIL=""
+USE_EXTERNAL_DB="no"
+DATABASE_URL=""
 
 # Print colored messages
 print_success() {
@@ -64,17 +66,38 @@ get_configuration() {
         exit 1
     fi
     
-    read -p "PostgreSQL database name [ronbureau]: " DB_NAME
-    DB_NAME=${DB_NAME:-ronbureau}
-    
-    read -p "PostgreSQL username [ronbureau]: " DB_USER
-    DB_USER=${DB_USER:-ronbureau}
-    
-    read -sp "PostgreSQL password: " DB_PASSWORD
     echo ""
-    if [ -z "$DB_PASSWORD" ]; then
-        print_error "Database password is required"
-        exit 1
+    print_info "Database Setup Options:"
+    print_info "  1) Use external database (e.g., Prisma.io, hosted PostgreSQL)"
+    print_info "  2) Install and configure local PostgreSQL database"
+    echo ""
+    read -p "Choose database option (1 or 2) [2]: " DB_OPTION
+    DB_OPTION=${DB_OPTION:-2}
+    
+    if [ "$DB_OPTION" = "1" ]; then
+        USE_EXTERNAL_DB="yes"
+        echo ""
+        print_info "Enter your external database connection string."
+        print_info "Example: postgresql://user:password@host:5432/database?schema=public"
+        read -p "DATABASE_URL: " DATABASE_URL
+        if [ -z "$DATABASE_URL" ]; then
+            print_error "DATABASE_URL is required for external database"
+            exit 1
+        fi
+    else
+        USE_EXTERNAL_DB="no"
+        read -p "PostgreSQL database name [ronbureau]: " DB_NAME
+        DB_NAME=${DB_NAME:-ronbureau}
+        
+        read -p "PostgreSQL username [ronbureau]: " DB_USER
+        DB_USER=${DB_USER:-ronbureau}
+        
+        read -sp "PostgreSQL password: " DB_PASSWORD
+        echo ""
+        if [ -z "$DB_PASSWORD" ]; then
+            print_error "Database password is required"
+            exit 1
+        fi
     fi
     
     read -sp "JWT Secret (leave empty to generate): " JWT_SECRET
@@ -100,7 +123,11 @@ get_configuration() {
     print_info "Configuration:"
     print_info "  Domain: $DOMAIN"
     print_info "  Email: $EMAIL"
-    print_info "  Database: $DB_NAME"
+    if [ "$USE_EXTERNAL_DB" = "yes" ]; then
+        print_info "  Database: External (provided DATABASE_URL)"
+    else
+        print_info "  Database: Local PostgreSQL ($DB_NAME)"
+    fi
     print_info "  Frontend Port: $FRONTEND_PORT"
     print_info "  Backend Port: $BACKEND_PORT"
     echo ""
@@ -215,12 +242,21 @@ setup_application() {
     
     # Create backend .env file
     print_info "Creating backend environment file..."
-    cat > "$APP_DIR/backend/.env" <<EOF
+    if [ "$USE_EXTERNAL_DB" = "yes" ]; then
+        cat > "$APP_DIR/backend/.env" <<EOF
+DATABASE_URL="$DATABASE_URL"
+JWT_SECRET="$JWT_SECRET"
+FRONTEND_URL="https://$DOMAIN"
+PORT=$BACKEND_PORT
+EOF
+    else
+        cat > "$APP_DIR/backend/.env" <<EOF
 DATABASE_URL="postgresql://$DB_USER:$DB_PASSWORD@localhost:5432/$DB_NAME?schema=public"
 JWT_SECRET="$JWT_SECRET"
 FRONTEND_URL="https://$DOMAIN"
 PORT=$BACKEND_PORT
 EOF
+    fi
     
     # Create frontend .env file
     print_info "Creating frontend environment file..."
@@ -433,11 +469,16 @@ print_completion() {
     print_info "  Check status:     sudo -u $APP_USER pm2 status"
     print_info "  Monitor apps:     sudo -u $APP_USER pm2 monit"
     echo ""
-    print_info "Database connection:"
-    print_info "  Host:     localhost"
-    print_info "  Database: $DB_NAME"
-    print_info "  User:     $DB_USER"
-    echo ""
+    if [ "$USE_EXTERNAL_DB" = "no" ]; then
+        print_info "Database connection:"
+        print_info "  Host:     localhost"
+        print_info "  Database: $DB_NAME"
+        print_info "  User:     $DB_USER"
+        echo ""
+    else
+        print_info "Using external database from provided DATABASE_URL"
+        echo ""
+    fi
     print_info "To seed the database with test users:"
     print_info "  cd $APP_DIR/backend"
     print_info "  sudo -u $APP_USER npm run prisma:seed"
@@ -457,8 +498,15 @@ main() {
     
     update_system
     install_nodejs
-    install_postgresql
-    setup_database
+    
+    # Only install and setup PostgreSQL if using local database
+    if [ "$USE_EXTERNAL_DB" = "no" ]; then
+        install_postgresql
+        setup_database
+    else
+        print_info "Skipping PostgreSQL installation (using external database)"
+    fi
+    
     install_nginx
     create_app_user
     setup_application
