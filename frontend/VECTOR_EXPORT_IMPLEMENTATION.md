@@ -1,44 +1,40 @@
-# Vector Tiles & SVG→PDF Export Implementation
+# Map Style Selector & Unified PDF Export Implementation
 
 ## 📋 Overview
 
-This implementation adds **FULL vector tile basemap support** (with MapTiler or OpenFreeMap) and **SVG-based vector PDF export**, providing professional-quality map exports with crisp, scalable text, routes, and complete basemap rendering.
+This implementation provides a **unified map style selector** supporting OSM (default), OpenFreeMap, and MapTiler, along with a **unified PDF export** that renders places and routes as SVG vectors with the basemap as a raster image.
 
 ## 🎯 Key Features Implemented
 
-### 1. Complete Vector Basemap Integration
-- **MapTiler Integration (Premium)**: Professional vector tiles with full styling
-  - Roads, buildings, labels, POIs, terrain
-  - Multiple style options (basic, streets, outdoor, satellite)
-  - 100,000 tile loads/month FREE tier
-- **OpenFreeMap (Free Fallback)**: No API key required
-  - Automatic fallback if MapTiler key not configured
-  - Liberty style with complete OSM coverage
-  - Unlimited, free usage
-- **Smart Provider Selection**: Automatically chooses best available option
-- **Status Indicators**: Visual badges show active provider
+### 1. Unified Map Style Selector
+- **OSM Standard (Default)**: Classic OpenStreetMap raster tiles - works without any API key
+- **OpenFreeMap Liberty**: Free vector tiles, no API key required
+- **MapTiler Styles**: Premium vector tiles with multiple style options (requires API key)
+  - Basic, Streets, Topo, DataViz, Winter, Satellite, Outdoor
 
-### 2. Vector Tiles Integration
-- **Complete Basemap**: Not just overlays — full vector rendering of all map elements
-- **Toggle Control**: UI button to switch between raster (standard OSM) and vector tiles
-- **Dynamic Layer Switching**: Seamless switching without page reload
-- **MVT Format**: Uses Mapbox Vector Tiles with OpenLayers + ol-mapbox-style
+### 2. Tile Provider Integration  
+- **OSM (Default)**: Standard raster tiles from OpenStreetMap
+- **OpenFreeMap**: Free vector tiles using Liberty style
+- **MapTiler**: Premium vector tiles with multiple style options
+- **Automatic Fallback**: If MapTiler key is missing, falls back to OSM
 
-### 2. SVG-Based Vector PDF Export
-- **Pure Vector Output**: Places and routes are exported as true vector graphics (SVG → PDF)
-- **Crisp Text**: Labels remain sharp at any zoom level or print size
-- **Hybrid Mode**: Optional basemap inclusion (raster background + vector overlay)
-- **Full Feature Support**: All existing PDF features (legend, scale bar, north pointer) preserved
+### 3. Unified PDF Export
+- **Basemap as Raster**: Map canvas (regardless of source) exported as JPEG (0.85 quality)
+- **Places as SVG**: All saved places rendered as crisp vector graphics
+- **Routes as SVG**: All routes rendered as crisp vector paths
+- **Direction Markers**: Origin (A), destination (B), and stops rendered as SVG
+- **Full Decorations**: Title, legend, scale bar, north pointer, credits
 
-### 3. Enhanced PDF Export Options
-- **Vector Export Toggle**: Checkbox to enable SVG→PDF vector export
-- **Basemap Control**: Option to include/exclude basemap in vector exports
-- **Quality Settings**: Same scale, page size, and content options as before
-- **Dual Export Modes**: Choice between traditional high-res raster or new vector export
+### 4. Helper Functions
+- `calculateExportExtent()`: Calculate combined extent from features for auto-scale
+- `applyAutoScale()`: Apply auto-scale to map view
+- `addPdfDecorations()`: Add north pointer, scale bar, legend, and credits
+- `addPlaceToSvg()`: Render a place marker as SVG
+- `addRouteToSvg()`: Render a route as SVG path
 
 ## 🔧 Technical Implementation
 
-### Dependencies Added
+### Dependencies
 ```json
 {
   "svg2pdf.js": "^2.2.4",
@@ -238,14 +234,16 @@ const vectorTileSource = new VectorTileSource({
 ## ✅ Testing Checklist
 
 - [x] Vector tiles load correctly
-- [x] Toggle between raster and vector tiles works
-- [x] Vector PDF export generates valid PDF
+- [x] Map style selector works correctly
+- [x] Vector PDF export generates valid PDF (bug fixed: was returning early without calling exportVectorPdfMap)
 - [x] Labels are crisp and readable in vector PDF
 - [x] Routes render correctly as vector paths
+- [x] Places render correctly in vector PDF export
 - [x] Basemap inclusion option works
 - [x] Legend, scale bar, and north pointer appear correctly
+- [x] Dark theme compatibility for sidebar style selector
 - [x] No TypeScript errors
-- [x] No runtime console errors
+- [x] PDF file size optimized (JPEG compression 0.85)
 - [ ] Test with large number of places (100+)
 - [ ] Test with long routes (1000+ points)
 - [ ] Test on different browsers (Chrome, Firefox, Safari)
