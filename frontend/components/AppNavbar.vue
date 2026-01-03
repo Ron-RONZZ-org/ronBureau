@@ -1,4 +1,5 @@
 <template>
+  <ClientOnly>
   <nav class="navbar">
     <div class="navbar-container">
       <NuxtLink to="/home" class="navbar-brand">
@@ -6,27 +7,30 @@
         RonBureau
       </NuxtLink>
 
-      <div class="navbar-menu" v-if="auth.isAuthenticated">
-        <NuxtLink to="/home" class="nav-link" :class="{ active: route.path === '/home' }">
-          Home
-        </NuxtLink>
-        <NuxtLink to="/apps" class="nav-link" :class="{ active: route.path === '/apps' }">
-          Apps
-        </NuxtLink>
-        <NuxtLink to="/dashboard" class="nav-link" :class="{ active: route.path === '/dashboard' }">
-          Dashboard
-        </NuxtLink>
-      </div>
+        <template v-if="auth.isAuthenticated">
+          <div class="navbar-menu">
+            <NuxtLink to="/home" class="nav-link" :class="{ active: route.path === '/home' }">
+              Home
+            </NuxtLink>
+            <NuxtLink to="/apps" class="nav-link" :class="{ active: route.path === '/apps' }">
+              Apps
+            </NuxtLink>
+            <NuxtLink to="/dashboard" class="nav-link" :class="{ active: route.path === '/dashboard' }">
+              Dashboard
+            </NuxtLink>
+          </div>
 
-      <div class="navbar-actions" v-if="auth.isAuthenticated">
-        <span class="user-info">
-          <span class="user-name">{{ auth.user?.displayName }}</span>
-          <span class="user-badge" :class="badgeClass">{{ userTypeName }}</span>
-        </span>
-        <button class="btn btn-outline" @click="handleLogout">Logout</button>
+          <div class="navbar-actions">
+            <span class="user-info">
+              <span class="user-name">{{ auth.user?.displayName }}</span>
+              <span class="user-badge" :class="badgeClass">{{ userTypeName }}</span>
+            </span>
+            <button class="btn btn-outline" @click="handleLogout">Logout</button>
+          </div>
+        </template>
       </div>
-    </div>
-  </nav>
+    </nav>
+  </ClientOnly>
 </template>
 
 <script setup lang="ts">
