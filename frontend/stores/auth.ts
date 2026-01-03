@@ -17,6 +17,7 @@ interface User {
 interface AuthState {
   user: User | null;
   token: string | null;
+  tokenExpiry: number | null;
   isAuthenticated: boolean;
 }
 
@@ -24,6 +25,7 @@ export const useAuthStore = defineStore('auth', {
   state: (): AuthState => ({
     user: null,
     token: null,
+    tokenExpiry: null,
     isAuthenticated: false,
   }),
 
@@ -33,9 +35,30 @@ export const useAuthStore = defineStore('auth', {
       state.user?.preferences || { theme: 'light', datetimeFormat: 'ISO' },
     isAdmin: (state) => 
       state.user?.userType === 'ADMINISTRATOR' || state.user?.userType === 'ORGANIZATION_OWNER',
+    isTokenValid: (state) => {
+      if (!state.token || !state.tokenExpiry) return false;
+      return Date.now() < state.tokenExpiry;
+    },
   },
 
   actions: {
+    decodeToken(token: string): { exp?: number } {
+      try {
+        const base64Url = token.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(
+          atob(base64)
+            .split('')
+            .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+            .join('')
+        );
+        return JSON.parse(jsonPayload);
+      } catch (error) {
+        console.error('Failed to decode token:', error);
+        return {};
+      }
+    },
+
     async login(userId: string, password: string) {
       const config = useRuntimeConfig();
       try {
@@ -51,9 +74,14 @@ export const useAuthStore = defineStore('auth', {
         this.user = response.user;
         this.isAuthenticated = true;
 
-        // Store token in localStorage
+        // Decode token to get expiration time
+        const decoded = this.decodeToken(response.access_token);
+        this.tokenExpiry = decoded.exp ? decoded.exp * 1000 : null;
+
+        // Store token and expiry in localStorage
         if (import.meta.client) {
           localStorage.setItem('token', response.access_token);
+          localStorage.setItem('tokenExpiry', this.tokenExpiry?.toString() || '');
           localStorage.setItem('user', JSON.stringify(response.user));
         }
 
@@ -72,10 +100,12 @@ export const useAuthStore = defineStore('auth', {
     logout() {
       this.user = null;
       this.token = null;
+      this.tokenExpiry = null;
       this.isAuthenticated = false;
 
       if (import.meta.client) {
         localStorage.removeItem('token');
+        localStorage.removeItem('tokenExpiry');
         localStorage.removeItem('user');
         document.documentElement.removeAttribute('data-theme');
       }
@@ -84,13 +114,10 @@ export const useAuthStore = defineStore('auth', {
     },
 
     async updatePreferences(preferences: Partial<UserPreferences>) {
-      const config = useRuntimeConfig();
       try {
-        await $fetch(`${config.public.apiBase}/users/preferences`, {
+        const { apiFetch } = useApi();
+        await apiFetch('/users/preferences', {
           method: 'PUT',
-          headers: {
-            Authorization: `Bearer ${this.token}`,
-          },
           body: preferences,
         });
 
@@ -110,7 +137,7 @@ export const useAuthStore = defineStore('auth', {
       } catch (error: any) {
         return { 
           success: false, 
-          error: error.data?.message || 'Failed to update preferences' 
+          error: error.message || 'Failed to update preferences' 
         };
       }
     },
@@ -129,12 +156,22 @@ export const useAuthStore = defineStore('auth', {
     initFromStorage() {
       if (import.meta.client) {
         const token = localStorage.getItem('token');
+        const tokenExpiry = localStorage.getItem('tokenExpiry');
         const userStr = localStorage.getItem('user');
 
         if (token && userStr) {
           try {
             this.token = token;
+            this.tokenExpiry = tokenExpiry ? parseInt(tokenExpiry) : null;
             this.user = JSON.parse(userStr);
+
+            // Check if token is still valid
+            if (this.tokenExpiry && Date.now() >= this.tokenExpiry) {
+              console.warn('Token has expired. Logging out...');
+              this.logout();
+              return;
+            }
+
             this.isAuthenticated = true;
             this.applyTheme();
           } catch {
