@@ -427,13 +427,13 @@ sudo -u ronbureau npm run prisma:seed
 
 This creates test users:
 
-| User ID    | Password    | Type               | Status    |
-|------------|-------------|--------------------|-----------|
-| admin      | password123 | Administrator      | Active    |
-| owner      | password123 | Organization Owner | Active    |
-| user1      | password123 | User               | Active    |
-| suspended  | password123 | User               | Suspended |
-| expired    | password123 | User               | Expired   |
+| User ID   | Password    | Type               | Status    |
+|-----------|-------------|--------------------|-----------|
+| admin     | password123 | Administrator      | Active    |
+| owner     | password123 | Organization Owner | Active    |
+| user1     | password123 | User               | Active    |
+| suspended | password123 | User               | Suspended |
+| expired   | password123 | User               | Expired   |
 
 **⚠️ Important:** Change these passwords in production!
 
