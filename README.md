@@ -4,7 +4,8 @@ Modern User Management System built with Nuxt.js, Nest.js, and Prisma with Postg
 
 ## Features
 
-- **User Authentication**: Secure login system with JWT tokens
+- **User Authentication**: Secure login system with JWT tokens (24-hour expiration)
+- **Auto Logout**: Automatic logout on token expiration to prevent unauthorized access
 - **User Management**: Support for different user types (User, Administrator, Organization Owner)
 - **User Dashboard**: Personalized dashboard with user preferences
 - **Theme Support**: Dark/Light theme toggle
@@ -151,10 +152,21 @@ Users can customize their experience with:
 
 ## API Endpoints
 
-- `POST /auth/login`: Authenticate user
+- `POST /auth/login`: Authenticate user (returns JWT token valid for 24 hours)
 - `GET /users/me`: Get current user profile
 - `GET /users/preferences`: Get user preferences
 - `PUT /users/preferences`: Update user preferences
+
+## Deployment
+
+For production deployment on Ubuntu 24.04 LTS with Nginx and Let's Encrypt SSL:
+
+See **[DEPLOYMENT.md](DEPLOYMENT.md)** for detailed instructions.
+
+Quick deployment:
+```bash
+sudo ./deploy.sh
+```
 
 ## License
 
