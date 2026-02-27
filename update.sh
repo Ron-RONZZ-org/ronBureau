@@ -184,6 +184,7 @@ update_backend() {
     if [ "$SKIP_DEPS" = "no" ]; then
         print_info "Installing backend dependencies..."
         sudo -u "$APP_USER" npm install
+        sudo -u "$APP_USER" npm audit fix
     fi
     
     print_info "Generating Prisma client..."
@@ -222,6 +223,7 @@ update_frontend() {
     if [ "$SKIP_DEPS" = "no" ]; then
         print_info "Installing frontend dependencies..."
         sudo -u "$APP_USER" npm install
+        sudo -u "$APP_USER" npm audit fix			
     fi
     
     print_info "Building frontend..."
