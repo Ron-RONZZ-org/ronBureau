@@ -662,6 +662,8 @@
 </template>
 
 <script setup lang="ts">
+definePageMeta({ ssr: false });
+
 import { useAuthStore } from '~/stores/auth';
 import Map from 'ol/Map';
 import View from 'ol/View';
