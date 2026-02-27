@@ -36,6 +36,7 @@ Wait for DNS propagation (can take up to 24-48 hours, but usually faster).
 ### Firewall Ports
 
 Ensure these ports are open:
+
 - Port 22 (SSH)
 - Port 80 (HTTP)
 - Port 443 (HTTPS)
@@ -47,17 +48,20 @@ The automated deployment script handles everything for you.
 ### Step 1: Prepare Server
 
 1. SSH into your server:
+
    ```bash
    ssh root@your-server-ip
    ```
 
 2. Create a directory for the application:
+
    ```bash
    mkdir -p /opt/ronbureau
    cd /opt/ronbureau
    ```
 
 3. Copy or clone the RonBureau application to the server:
+
    ```bash
    # Option 1: Using git (if repository is accessible)
    git clone https://github.com/Ron-RONZZ-org/ronBureau.git .
@@ -71,11 +75,13 @@ The automated deployment script handles everything for you.
 ### Step 2: Run Deployment Script
 
 1. Make the script executable (if not already):
+
    ```bash
    chmod +x /opt/ronbureau/deploy.sh
    ```
 
 2. Run the deployment script:
+
    ```bash
    sudo /opt/ronbureau/deploy.sh
    ```
@@ -90,6 +96,7 @@ The automated deployment script handles everything for you.
    - Confirm to proceed with installation
 
 The script will:
+
 - ✅ Update system packages
 - ✅ Install Node.js 18.x
 - ✅ Install and configure PostgreSQL (if local database selected)
@@ -113,6 +120,7 @@ sudo -u ronbureau npm run prisma:seed
 ### Step 4: Access Application
 
 Your application is now running at:
+
 ```
 https://your-domain.com
 ```
@@ -124,6 +132,7 @@ RonBureau supports two database deployment options:
 ### Option 1: External Database (Recommended for Cloud Deployments)
 
 Use a hosted PostgreSQL database service like:
+
 - **Prisma.io Accelerate** - Managed PostgreSQL with connection pooling
 - **Neon** - Serverless PostgreSQL
 - **Supabase** - Open source Firebase alternative
@@ -133,6 +142,7 @@ Use a hosted PostgreSQL database service like:
 - **Azure Database for PostgreSQL** - Microsoft's managed database
 
 **Advantages:**
+
 - ✅ No database installation or management needed
 - ✅ Automatic backups
 - ✅ Built-in scaling
@@ -167,6 +177,7 @@ DATABASE_URL="postgresql://postgres:password@containers.railway.app:5432/railway
 Install and manage PostgreSQL on your server.
 
 **Advantages:**
+
 - ✅ Full control over database
 - ✅ No external dependencies
 - ✅ Lower latency
@@ -205,7 +216,7 @@ sudo apt-get install -y postgresql postgresql-contrib
 
 ### 2. Configure Database
 
-#### For Local PostgreSQL:
+#### For Local PostgreSQL
 
 ```bash
 # Create database and user
@@ -217,7 +228,7 @@ ALTER DATABASE ronbureau OWNER TO ronbureau;
 EOF
 ```
 
-#### For External Database:
+#### For External Database
 
 No PostgreSQL installation needed. Just obtain your DATABASE_URL from your provider.
 
@@ -235,6 +246,7 @@ sudo mkdir -p /opt/ronbureau
 ```
 
 **For Local Database:**
+
 ```bash
 sudo -u ronbureau cat > /opt/ronbureau/backend/.env <<EOF
 DATABASE_URL="postgresql://ronbureau:your-password@localhost:5432/ronbureau?schema=public"
@@ -245,6 +257,7 @@ EOF
 ```
 
 **For External Database:**
+
 ```bash
 sudo -u ronbureau cat > /opt/ronbureau/backend/.env <<EOF
 DATABASE_URL="your-external-database-url"
@@ -255,6 +268,7 @@ EOF
 ```
 
 **Frontend .env file:**
+
 ```bash
 sudo -u ronbureau cat > /opt/ronbureau/frontend/.env <<EOF
 API_BASE="https://your-domain.com/api"
@@ -404,16 +418,19 @@ sudo ufw status
 ### Verify Installation
 
 1. Check PM2 processes:
+
    ```bash
    sudo -u ronbureau pm2 status
    ```
 
 2. Check application logs:
+
    ```bash
    sudo -u ronbureau pm2 logs
    ```
 
 3. Test the application:
+
    ```bash
    curl https://your-domain.com
    ```
@@ -470,6 +487,7 @@ sudo -u ronbureau pm2 restart ronbureau-frontend
 See **[UPDATE-ronBureau.md](UPDATE-ronBureau.md)** for detailed update instructions.
 
 Quick update:
+
 ```bash
 sudo /opt/ronbureau/update.sh
 ```
@@ -477,6 +495,7 @@ sudo /opt/ronbureau/update.sh
 ### Database Backup
 
 **For Local PostgreSQL:**
+
 ```bash
 # Create backup
 sudo -u postgres pg_dump ronbureau > backup-$(date +%Y%m%d-%H%M%S).sql
@@ -513,16 +532,19 @@ free -h
 ### Application Won't Start
 
 1. Check PM2 logs:
+
    ```bash
    sudo -u ronbureau pm2 logs
    ```
 
 2. Check if ports are in use:
+
    ```bash
    sudo netstat -tulpn | grep -E '3002|3020'
    ```
 
 3. Verify environment variables:
+
    ```bash
    cat /opt/ronbureau/backend/.env
    cat /opt/ronbureau/frontend/.env
@@ -533,11 +555,13 @@ free -h
 **For Local PostgreSQL:**
 
 1. Check PostgreSQL status:
+
    ```bash
    sudo systemctl status postgresql
    ```
 
 2. Test database connection:
+
    ```bash
    sudo -u postgres psql -d ronbureau -c "SELECT 1;"
    ```
@@ -552,16 +576,19 @@ free -h
 ### Nginx Errors
 
 1. Check Nginx configuration:
+
    ```bash
    sudo nginx -t
    ```
 
 2. Check Nginx logs:
+
    ```bash
    sudo tail -f /var/log/nginx/error.log
    ```
 
 3. Verify Nginx is running:
+
    ```bash
    sudo systemctl status nginx
    ```
@@ -571,16 +598,19 @@ free -h
 This usually means the backend isn't running:
 
 1. Check if backend is running:
+
    ```bash
    sudo -u ronbureau pm2 status
    ```
 
 2. Check backend port:
+
    ```bash
    sudo netstat -tulpn | grep 3020
    ```
 
 3. Restart backend:
+
    ```bash
    sudo -u ronbureau pm2 restart ronbureau-backend
    ```
@@ -588,16 +618,19 @@ This usually means the backend isn't running:
 ### SSL Certificate Issues
 
 1. Check certificate status:
+
    ```bash
    sudo certbot certificates
    ```
 
 2. Renew certificate manually:
+
    ```bash
    sudo certbot renew
    ```
 
 3. Check Nginx SSL configuration:
+
    ```bash
    sudo cat /etc/nginx/sites-available/ronbureau
    ```
@@ -654,7 +687,8 @@ MAPTILER_API_KEY=optional-key
 ## Support
 
 For issues and questions:
-- GitHub Issues: https://github.com/Ron-RONZZ-org/ronBureau/issues
+
+- GitHub Issues: <https://github.com/Ron-RONZZ-org/ronBureau/issues>
 - Documentation: See [README.md](../README.md)
 - Updates: See [UPDATE-ronBureau.md](UPDATE-ronBureau.md)
 
