@@ -356,6 +356,7 @@
             <label>Password <span class="hint">(optional)</span></label>
             <input v-model="cdForm.password" type="password" class="input" placeholder="password" autocomplete="current-password" />
           </div>
+          <p class="modal-hint warn-hint">⚠️ Credentials are stored in browser localStorage. Do not use sensitive passwords on shared devices.</p>
           <div class="input-group">
             <label class="checkbox-inline">
               <input type="checkbox" v-model="cdForm.editable" />
@@ -731,7 +732,7 @@ function handleTimeGridClick(e: MouseEvent, day: Date) {
   const target = e.currentTarget as HTMLElement;
   const y = e.clientY - target.getBoundingClientRect().top;
   const hour = Math.floor(y / HOUR_PX);
-  const min  = Math.round((y % HOUR_PX) / (HOUR_PX / 60) / 15) * 15;
+  const min  = Math.round((y % HOUR_PX) / HOUR_PX * 60 / 15) * 15;
   const startTime = `${String(hour).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
   const endHour = Math.min(hour + 1, 23);
   const endTime   = `${String(endHour).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
@@ -795,6 +796,18 @@ async function subscribeCalDAV() {
     cdError.value = 'Please provide a name and URL.';
     return;
   }
+  // Basic URL validation – only allow http/https to prevent SSRF via other schemes
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(cdForm.value.url);
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+      cdError.value = 'Only HTTP and HTTPS URLs are supported.';
+      return;
+    }
+  } catch {
+    cdError.value = 'Invalid URL. Please enter a valid http:// or https:// address.';
+    return;
+  }
   isCdLoading.value = true;
   cdError.value = '';
   try {
@@ -802,7 +815,7 @@ async function subscribeCalDAV() {
     if (cdForm.value.username && cdForm.value.password) {
       headers['Authorization'] = `Basic ${btoa(`${cdForm.value.username}:${cdForm.value.password}`)}`;
     }
-    const icsText = await $fetch<string>(cdForm.value.url, { headers, responseType: 'text' });
+    const icsText = await $fetch<string>(parsedUrl.toString(), { headers, responseType: 'text' });
     const calId = crypto.randomUUID();
     calendars.value.push({
       id: calId, name: cdForm.value.name, color: cdForm.value.color,
@@ -845,7 +858,7 @@ function maybeSyncToCalDAV(evt: CalEvent) {
 async function syncEventToCalDAV(evt: CalEvent, cal: Calendar) {
   if (!cal.subscriptionUrl) return;
   try {
-    const eventUrl = evt.caldavUrl ?? `${cal.subscriptionUrl.replace(/\/$/, '')}/${evt.uid}.ics`;
+    const eventUrl = evt.caldavUrl ?? `${cal.subscriptionUrl.replace(/\/$/, '')}/${encodeURIComponent(evt.uid)}.ics`;
     const headers: Record<string, string> = { 'Content-Type': 'text/calendar; charset=utf-8' };
     if (cal.username && cal.password) {
       headers['Authorization'] = `Basic ${btoa(`${cal.username}:${cal.password}`)}`;
@@ -888,7 +901,8 @@ function foldLine(line: string): string {
 }
 
 function generateICS(evts: CalEvent[]): string {
-  const stamp = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15) + 'Z';
+  // Format: YYYYMMDDTHHmmssZ (ISO 8601 basic format without milliseconds)
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '') + 'Z';
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//RonBureau//Calendar 1.0//EN', 'CALSCALE:GREGORIAN'];
   for (const e of evts) {
     lines.push('BEGIN:VEVENT');
@@ -1446,6 +1460,7 @@ onMounted(() => {
 .modal-content.modal-lg { max-width: 580px; }
 .modal-content h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; }
 .modal-hint { font-size: 0.8rem; color: var(--color-text-muted); margin-bottom: 1rem; }
+.warn-hint  { color: var(--color-warning); }
 
 .form-grid {
   display: grid;
