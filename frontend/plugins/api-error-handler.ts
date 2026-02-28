@@ -1,6 +1,5 @@
 export default defineNuxtPlugin({
   name: 'api-error-handler',
-  enforce: 'pre',
   setup() {
     const authStore = useAuthStore();
 
