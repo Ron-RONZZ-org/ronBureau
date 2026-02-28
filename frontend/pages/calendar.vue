@@ -105,7 +105,7 @@
                   >
                     <span v-if="visibility.time && !evt.allDay" class="chip-time">{{ evt.startTime }}</span>
                     <span v-if="visibility.title" class="chip-title">{{ evt.title }}</span>
-                    <span v-if="visibility.location && evt.location" class="chip-loc" title="Has location">📍</span>
+                    <span v-if="visibility.location && evt.location" class="chip-loc">📍{{ evt.location }}</span>
                     <span v-if="visibility.category && evt.category" class="chip-cat">· {{ evt.category }}</span>
                   </div>
                   <div
@@ -163,7 +163,7 @@
                       v-for="evt in timedEventsForDate(day)"
                       :key="evt.id"
                       class="tg-event"
-                      :style="timedEventStyle(evt)"
+                      :style="timedEventStyle(evt, day)"
                       @click.stop="openEditEventModal(evt)"
                       :title="buildEventTooltip(evt)"
                     >
@@ -178,7 +178,7 @@
             </div>
           </div>
 
-          <!-- ── Day View ────────────────────────────────────────────────── -->
+          <!-- ── Day View ───────────────────────────────────────────────── -->
           <div v-else-if="currentView === 'day'" class="time-view">
             <div class="time-view-header">
               <div class="tg-corner"></div>
@@ -214,7 +214,7 @@
                       v-for="evt in timedEventsForDate(currentDate)"
                       :key="evt.id"
                       class="tg-event"
-                      :style="timedEventStyle(evt)"
+                      :style="timedEventStyle(evt, currentDate)"
                       @click.stop="openEditEventModal(evt)"
                       :title="buildEventTooltip(evt)"
                     >
@@ -479,6 +479,7 @@ const calendars = ref<Calendar[]>([]);
 const events = ref<CalEvent[]>([]);
 
 const visibility = ref({ title: true, time: true, location: false, category: false });
+watch(visibility, () => saveToStorage(), { deep: true });
 
 // ─── Modal state ──────────────────────────────────────────────────────────────
 const showEventModal = ref(false);
@@ -611,11 +612,16 @@ function getRandomColor(): string {
 
 function visibleEventsForDate(date: Date): CalEvent[] {
   const ds = dateStr(date);
-  return events.value.filter(evt => {
-    const cal = calendars.value.find(c => c.id === evt.calendarId);
-    if (!cal?.visible) return false;
-    return evt.startDate <= ds && evt.endDate >= ds;
-  });
+  return events.value
+    .filter(evt => {
+      const cal = calendars.value.find(c => c.id === evt.calendarId);
+      if (!cal?.visible) return false;
+      return evt.startDate <= ds && evt.endDate >= ds;
+    })
+    .sort((a, b) => {
+      if (a.allDay !== b.allDay) return a.allDay ? -1 : 1;
+      return a.startTime.localeCompare(b.startTime);
+    });
 }
 
 function allDayEventsForDate(date: Date): CalEvent[] {
@@ -626,9 +632,12 @@ function timedEventsForDate(date: Date): CalEvent[] {
   return visibleEventsForDate(date).filter(e => !e.allDay);
 }
 
-function timedEventStyle(evt: CalEvent): Record<string, string> {
-  const [sh, sm] = evt.startTime.split(':').map(Number);
-  const [eh, em] = evt.endTime.split(':').map(Number);
+function timedEventStyle(evt: CalEvent, day?: Date): Record<string, string> {
+  const ds = day ? dateStr(day) : evt.startDate;
+  const effStartTime = evt.startDate < ds ? '00:00' : evt.startTime;
+  const effEndTime = evt.endDate > ds ? '24:00' : evt.endTime;
+  const [sh, sm] = effStartTime.split(':').map(Number);
+  const [eh, em] = effEndTime.split(':').map(Number);
   const top = (sh * 60 + sm) * (HOUR_PX / 60);
   const dur = Math.max((eh * 60 + em) - (sh * 60 + sm), 15);
   return {
@@ -785,6 +794,16 @@ function updateCalendarColor(calId: string, color: string) {
 
 // ─── CalDAV ───────────────────────────────────────────────────────────────────
 
+const { apiFetch } = useApi();
+
+async function fetchViaProxy(url: string, username?: string, password?: string): Promise<string> {
+  return apiFetch<string>('/caldav/proxy', {
+    method: 'POST',
+    body: { url, username: username || undefined, password: password || undefined },
+    responseType: 'text',
+  });
+}
+
 function openCalDAVModal() {
   cdForm.value = { name: '', url: '', color: '#8b5cf6', username: '', password: '', editable: false };
   cdError.value = '';
@@ -797,10 +816,9 @@ async function subscribeCalDAV() {
     return;
   }
   // Basic URL validation – only allow http/https to prevent SSRF via other schemes
-  let parsedUrl: URL;
   try {
-    parsedUrl = new URL(cdForm.value.url);
-    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+    const p = new URL(cdForm.value.url);
+    if (p.protocol !== 'http:' && p.protocol !== 'https:') {
       cdError.value = 'Only HTTP and HTTPS URLs are supported.';
       return;
     }
@@ -811,11 +829,7 @@ async function subscribeCalDAV() {
   isCdLoading.value = true;
   cdError.value = '';
   try {
-    const headers: Record<string, string> = { Accept: 'text/calendar,application/ics,*/*' };
-    if (cdForm.value.username && cdForm.value.password) {
-      headers['Authorization'] = `Basic ${btoa(`${cdForm.value.username}:${cdForm.value.password}`)}`;
-    }
-    const icsText = await $fetch<string>(parsedUrl.toString(), { headers, responseType: 'text' });
+    const icsText = await fetchViaProxy(cdForm.value.url, cdForm.value.username, cdForm.value.password);
     const calId = crypto.randomUUID();
     calendars.value.push({
       id: calId, name: cdForm.value.name, color: cdForm.value.color,
@@ -828,7 +842,7 @@ async function subscribeCalDAV() {
     showCalDAVModal.value = false;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    cdError.value = `Failed to fetch: ${msg}. Some servers block cross-origin requests (CORS).`;
+    cdError.value = `Failed to fetch calendar: ${msg}`;
   } finally {
     isCdLoading.value = false;
   }
@@ -837,11 +851,7 @@ async function subscribeCalDAV() {
 async function syncCalDAV(cal: Calendar) {
   if (!cal.subscriptionUrl) return;
   try {
-    const headers: Record<string, string> = { Accept: 'text/calendar,*/*' };
-    if (cal.username && cal.password) {
-      headers['Authorization'] = `Basic ${btoa(`${cal.username}:${cal.password}`)}`;
-    }
-    const icsText = await $fetch<string>(cal.subscriptionUrl, { headers, responseType: 'text' });
+    const icsText = await fetchViaProxy(cal.subscriptionUrl, cal.username, cal.password);
     events.value = events.value.filter(e => e.calendarId !== cal.id);
     importParsedEvents(parseICS(icsText), cal.id, !cal.editable);
     saveToStorage();
@@ -1315,7 +1325,8 @@ onMounted(() => {
 .evt-chip:hover { opacity: 0.85; }
 .chip-time { font-size: 0.65rem; opacity: 0.9; flex-shrink: 0; }
 .chip-title { overflow: hidden; text-overflow: ellipsis; flex: 1; }
-.chip-loc, .chip-cat { opacity: 0.85; flex-shrink: 0; }
+.chip-loc { font-size: 0.65rem; opacity: 0.85; min-width: 0; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+.chip-cat { opacity: 0.85; flex-shrink: 0; }
 
 .more-chip {
   font-size: 0.65rem;
