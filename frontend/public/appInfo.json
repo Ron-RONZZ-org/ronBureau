@@ -1,6 +1,14 @@
 {
   "apps": [
     {
+      "id": "calendar",
+      "name": "Calendar",
+      "description": "Multi-calendar app with day/week/month views, events, CalDAV support, and ICS import/export",
+      "icon": "📅",
+      "path": "/calendar",
+      "keywords": ["calendar", "events", "schedule", "caldav", "ics", "planner", "agenda"]
+    },
+    {
       "id": "maps",
       "name": "Maps",
       "description": "Interactive map with search, directions, and GeoJSON support",
