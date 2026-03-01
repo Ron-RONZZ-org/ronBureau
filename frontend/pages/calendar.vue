@@ -14,7 +14,7 @@
             <ul class="calendar-list">
               <li v-for="cal in calendars" :key="cal.id" class="calendar-item">
                 <label class="cal-item-label">
-                  <input type="checkbox" v-model="cal.visible" class="cal-check" :style="{ accentColor: cal.color }" />
+                  <input type="checkbox" v-model="cal.visible" @change="saveToStorage()" class="cal-check" :style="{ accentColor: cal.color }" />
                   <span class="cal-dot" :style="{ backgroundColor: cal.color }"></span>
                   <span class="cal-name">{{ cal.name }}</span>
                   <span v-if="cal.isSubscription" class="cal-badge" title="Subscribed">🔗</span>
@@ -76,7 +76,7 @@
                 <button class="view-btn" :class="{ active: currentView === 'month' }" @click="currentView = 'month'">Month</button>
               </div>
               <button class="btn btn-primary btn-sm" @click="openAddEventModal()">＋ Event</button>
-              <button class="btn btn-outline btn-sm no-print" @click="printCalendar">🖨️ Print</button>
+              <button class="btn btn-outline btn-sm no-print" @click="openPrintModal">🖨️ Print</button>
             </div>
           </div>
 
@@ -240,16 +240,17 @@
       <div v-if="showEventModal" class="modal-overlay" @click.self="showEventModal = false">
         <div class="modal-content modal-lg">
           <h3>{{ editingEvent ? '✏️ Edit Event' : '＋ New Event' }}</h3>
+          <div v-if="editingEvent?.readOnly" class="status-msg warn-msg">🔒 This event is from a read-only calendar and cannot be edited.</div>
 
           <div class="form-grid">
             <div class="input-group full">
               <label>Title <span class="req">*</span></label>
-              <input v-model="evtForm.title" type="text" class="input" placeholder="Event title" />
+              <input v-model="evtForm.title" type="text" class="input" placeholder="Event title" :disabled="editingEvent?.readOnly" />
             </div>
 
             <div class="input-group">
               <label>Calendar</label>
-              <select v-model="evtForm.calendarId" class="select">
+              <select v-model="evtForm.calendarId" class="select" :disabled="editingEvent?.readOnly">
                 <option
                   v-for="cal in editableCalendars"
                   :key="cal.id"
@@ -260,54 +261,54 @@
 
             <div class="input-group">
               <label>Category</label>
-              <input v-model="evtForm.category" type="text" class="input" placeholder="e.g. Work, Personal" />
+              <input v-model="evtForm.category" type="text" class="input" placeholder="e.g. Work, Personal" :disabled="editingEvent?.readOnly" />
             </div>
 
             <div class="input-group full">
               <label class="checkbox-inline">
-                <input type="checkbox" v-model="evtForm.allDay" /> All Day Event
+                <input type="checkbox" v-model="evtForm.allDay" :disabled="editingEvent?.readOnly" /> All Day Event
               </label>
             </div>
 
             <div class="input-group">
               <label>Start Date</label>
-              <input v-model="evtForm.startDate" type="date" class="input" />
+              <input v-model="evtForm.startDate" type="date" class="input" :disabled="editingEvent?.readOnly" />
             </div>
             <div class="input-group" v-if="!evtForm.allDay">
               <label>Start Time</label>
-              <input v-model="evtForm.startTime" type="time" class="input" />
+              <input v-model="evtForm.startTime" type="time" class="input" :disabled="editingEvent?.readOnly" />
             </div>
 
             <div class="input-group">
               <label>End Date</label>
-              <input v-model="evtForm.endDate" type="date" class="input" />
+              <input v-model="evtForm.endDate" type="date" class="input" :disabled="editingEvent?.readOnly" />
             </div>
             <div class="input-group" v-if="!evtForm.allDay">
               <label>End Time</label>
-              <input v-model="evtForm.endTime" type="time" class="input" />
+              <input v-model="evtForm.endTime" type="time" class="input" :disabled="editingEvent?.readOnly" />
             </div>
 
             <div class="input-group full">
               <label>Location</label>
-              <input v-model="evtForm.location" type="text" class="input" placeholder="Location..." />
+              <input v-model="evtForm.location" type="text" class="input" placeholder="Location..." :disabled="editingEvent?.readOnly" />
             </div>
 
             <div class="input-group full">
               <label>Description</label>
-              <textarea v-model="evtForm.description" class="input textarea" rows="3" placeholder="Description..."></textarea>
+              <textarea v-model="evtForm.description" class="input textarea" rows="3" placeholder="Description..." :disabled="editingEvent?.readOnly"></textarea>
             </div>
 
             <div class="input-group full">
               <label>Tags <span class="hint">(comma-separated)</span></label>
-              <input v-model="evtForm.tagsInput" type="text" class="input" placeholder="tag1, tag2, ..." />
+              <input v-model="evtForm.tagsInput" type="text" class="input" placeholder="tag1, tag2, ..." :disabled="editingEvent?.readOnly" />
             </div>
           </div>
 
           <div class="modal-buttons">
-            <button v-if="editingEvent" class="btn btn-outline danger-btn" @click="deleteCurrentEvent">🗑️ Delete</button>
+            <button v-if="editingEvent && !editingEvent.readOnly" class="btn btn-outline danger-btn" @click="deleteCurrentEvent">🗑️ Delete</button>
             <span class="btn-spacer"></span>
-            <button class="btn btn-outline" @click="showEventModal = false">Cancel</button>
-            <button class="btn btn-primary" @click="saveEvent">{{ editingEvent ? 'Update' : 'Add Event' }}</button>
+            <button class="btn btn-outline" @click="showEventModal = false">Close</button>
+            <button v-if="!editingEvent?.readOnly" class="btn btn-primary" @click="saveEvent">{{ editingEvent ? 'Update' : 'Add Event' }}</button>
           </div>
         </div>
       </div>
@@ -324,6 +325,26 @@
             <label>Color</label>
             <input v-model="calForm.color" type="color" class="input color-input" />
           </div>
+          <template v-if="editingCalendar?.isSubscription">
+            <div class="input-group">
+              <label>URL</label>
+              <input v-model="calForm.url" type="url" class="input" placeholder="https://example.com/calendar.ics" />
+            </div>
+            <div class="input-group">
+              <label>Username <span class="hint">(optional)</span></label>
+              <input v-model="calForm.username" type="text" class="input" placeholder="username" autocomplete="username" />
+            </div>
+            <div class="input-group">
+              <label>Password <span class="hint">(optional)</span></label>
+              <input v-model="calForm.password" type="password" class="input" placeholder="password" autocomplete="current-password" />
+            </div>
+            <div class="input-group">
+              <label class="checkbox-inline">
+                <input type="checkbox" v-model="calForm.editable" />
+                Allow editing &amp; syncing (CalDAV write)
+              </label>
+            </div>
+          </template>
           <div class="modal-buttons">
             <button class="btn btn-outline" @click="showCalendarModal = false">Cancel</button>
             <button class="btn btn-primary" @click="saveCalendar">{{ editingCalendar ? 'Update' : 'Create' }}</button>
@@ -331,45 +352,92 @@
         </div>
       </div>
 
-      <!-- CalDAV Subscription -->
+      <!-- CalDAV Subscription Wizard -->
       <div v-if="showCalDAVModal" class="modal-overlay" @click.self="showCalDAVModal = false">
-        <div class="modal-content">
-          <h3>🌐 CalDAV / ICS Subscription</h3>
-          <p class="modal-hint">Subscribe to a CalDAV calendar or ICS feed URL.</p>
-          <div class="input-group">
-            <label>Calendar Name <span class="req">*</span></label>
-            <input v-model="cdForm.name" type="text" class="input" placeholder="e.g. Work Calendar" />
+        <div class="modal-content modal-wide">
+          <h3>🌐 Subscribe to CalDAV Calendars</h3>
+
+          <!-- Step indicator -->
+          <div class="wizard-steps">
+            <span :class="['wizard-step', { active: cdStep === 1, done: cdStep > 1 }]">1. Connection</span>
+            <span class="wizard-sep">›</span>
+            <span :class="['wizard-step', { active: cdStep === 2, done: cdStep > 2 }]">2. Choose Calendars</span>
+            <span class="wizard-sep">›</span>
+            <span :class="['wizard-step', { active: cdStep === 3 }]">3. Confirm</span>
           </div>
-          <div class="input-group">
-            <label>URL <span class="req">*</span></label>
-            <input v-model="cdForm.url" type="url" class="input" placeholder="https://example.com/calendar.ics" />
-          </div>
-          <div class="input-group">
-            <label>Color</label>
-            <input v-model="cdForm.color" type="color" class="input color-input" />
-          </div>
-          <div class="input-group">
-            <label>Username <span class="hint">(optional)</span></label>
-            <input v-model="cdForm.username" type="text" class="input" placeholder="username" autocomplete="username" />
-          </div>
-          <div class="input-group">
-            <label>Password <span class="hint">(optional)</span></label>
-            <input v-model="cdForm.password" type="password" class="input" placeholder="password" autocomplete="current-password" />
-          </div>
-          <p class="modal-hint warn-hint">⚠️ Credentials are stored in browser localStorage. Do not use sensitive passwords on shared devices.</p>
-          <div class="input-group">
-            <label class="checkbox-inline">
-              <input type="checkbox" v-model="cdForm.editable" />
-              Allow editing &amp; syncing (CalDAV write)
-            </label>
-          </div>
-          <div v-if="cdError" class="status-msg error">{{ cdError }}</div>
-          <div class="modal-buttons">
-            <button class="btn btn-outline" @click="showCalDAVModal = false">Cancel</button>
-            <button class="btn btn-primary" @click="subscribeCalDAV" :disabled="isCdLoading">
-              {{ isCdLoading ? '⏳ Fetching…' : '🔗 Subscribe' }}
-            </button>
-          </div>
+
+          <!-- Step 1: credentials -->
+          <template v-if="cdStep === 1">
+            <p class="modal-hint">Enter your CalDAV server address and optional credentials.</p>
+            <div class="input-group">
+              <label>Server URL <span class="req">*</span></label>
+              <input v-model="cdCreds.url" type="url" class="input" placeholder="https://example.com/remote.php/dav" />
+            </div>
+            <div class="input-group">
+              <label>Username <span class="hint">(optional)</span></label>
+              <input v-model="cdCreds.username" type="text" class="input" placeholder="username" autocomplete="username" />
+            </div>
+            <div class="input-group">
+              <label>Password <span class="hint">(optional)</span></label>
+              <input v-model="cdCreds.password" type="password" class="input" placeholder="password" autocomplete="current-password" />
+            </div>
+            <p class="modal-hint warn-hint">⚠️ Credentials are stored in browser localStorage. Avoid using on shared devices.</p>
+            <div v-if="cdError" class="status-msg error">{{ cdError }}</div>
+            <div class="modal-buttons">
+              <button class="btn btn-outline" @click="showCalDAVModal = false">Cancel</button>
+              <button class="btn btn-primary" @click="discoverCalendars" :disabled="isCdLoading">
+                {{ isCdLoading ? '⏳ Discovering…' : '🔍 Discover Calendars' }}
+              </button>
+            </div>
+          </template>
+
+          <!-- Step 2: choose calendars -->
+          <template v-if="cdStep === 2">
+            <p class="modal-hint">Select which calendars to import, rename them, and assign colours.</p>
+            <div v-if="cdSelected.length === 0" class="status-msg warn-msg">No calendars found. You can go back and check the URL.</div>
+            <div class="cd-calendar-list">
+              <div v-for="(cal, i) in cdSelected" :key="cal.href" class="cd-calendar-row">
+                <label class="cd-cal-check">
+                  <input type="checkbox" v-model="cal.included" />
+                </label>
+                <input type="color" v-model="cal.color" class="color-picker-inline" :disabled="!cal.included" />
+                <input v-model="cal.name" type="text" class="input cd-cal-name" :disabled="!cal.included" :placeholder="'Calendar ' + (i + 1)" />
+                <label :class="['cd-mode-label', { 'cd-mode-disabled': !cal.included }]">
+                  <input type="checkbox" v-model="cal.editable" :disabled="!cal.included" />
+                  Editable
+                </label>
+              </div>
+            </div>
+            <div v-if="cdError" class="status-msg error">{{ cdError }}</div>
+            <div class="modal-buttons">
+              <button class="btn btn-outline" @click="cdStep = 1">‹ Back</button>
+              <div class="btn-spacer"></div>
+              <button class="btn btn-outline" @click="showCalDAVModal = false">Cancel</button>
+              <button class="btn btn-primary" @click="cdGoToSummary" :disabled="!cdSelected.some(c => c.included)">Next ›</button>
+            </div>
+          </template>
+
+          <!-- Step 3: summary & confirm -->
+          <template v-if="cdStep === 3">
+            <p class="modal-hint">Review the calendars to be subscribed, then confirm.</p>
+            <div class="cd-summary-list">
+              <div v-for="cal in cdSelected.filter(c => c.included)" :key="cal.href" class="cd-summary-row">
+                <span class="cal-dot" :style="{ backgroundColor: cal.color }"></span>
+                <span class="cd-sum-name">{{ cal.name }}</span>
+                <span class="cd-sum-badge">{{ cal.editable ? '✏️ Editable' : '👁️ Read-only' }}</span>
+              </div>
+            </div>
+            <div v-if="cdError" class="status-msg error">{{ cdError }}</div>
+            <div class="modal-buttons">
+              <button class="btn btn-outline" @click="cdStep = 2">‹ Back</button>
+              <div class="btn-spacer"></div>
+              <button class="btn btn-outline" @click="showCalDAVModal = false">Cancel</button>
+              <button class="btn btn-primary" @click="subscribeAllCalDAV" :disabled="isCdLoading">
+                {{ isCdLoading ? '⏳ Subscribing…' : '🔗 Subscribe' }}
+              </button>
+            </div>
+          </template>
+
         </div>
       </div>
 
@@ -411,12 +479,55 @@
         </div>
       </div>
 
+      <!-- Print / PDF Export -->
+      <div v-if="showPrintModal" class="modal-overlay" @click.self="showPrintModal = false">
+        <div class="modal-content">
+          <h3>🖨️ Print / Export PDF</h3>
+          <div class="form-grid">
+            <div class="input-group">
+              <label>Start Date <span class="req">*</span></label>
+              <input v-model="printForm.startDate" type="date" class="input" />
+            </div>
+            <div class="input-group">
+              <label>End Date <span class="req">*</span></label>
+              <input v-model="printForm.endDate" type="date" class="input" />
+            </div>
+          </div>
+          <div class="input-group">
+            <label>Layout</label>
+            <div class="view-switcher">
+              <button class="view-btn" :class="{ active: printForm.viewMode === 'day' }" @click="printForm.viewMode = 'day'">1 Day / Page</button>
+              <button class="view-btn" :class="{ active: printForm.viewMode === 'week' }" @click="printForm.viewMode = 'week'">1 Week / Page</button>
+              <button class="view-btn" :class="{ active: printForm.viewMode === 'month' }" @click="printForm.viewMode = 'month'">1 Month / Page</button>
+            </div>
+          </div>
+          <div class="input-group">
+            <label>Event Information</label>
+            <div class="view-switcher">
+              <button class="view-btn" :class="{ active: printForm.infoLevel === 'full' }" @click="printForm.infoLevel = 'full'">Full Details</button>
+              <button class="view-btn" :class="{ active: printForm.infoLevel === 'title-time' }" @click="printForm.infoLevel = 'title-time'">Title &amp; Time</button>
+              <button class="view-btn" :class="{ active: printForm.infoLevel === 'availability' }" @click="printForm.infoLevel = 'availability'">Availability Only</button>
+            </div>
+            <p class="modal-hint" style="margin-top:0.3rem">Availability Only shows coloured blocks — useful for sharing your schedule without details.</p>
+          </div>
+          <div v-if="printError" class="status-msg error">{{ printError }}</div>
+          <div class="modal-buttons">
+            <button class="btn btn-outline" @click="showPrintModal = false">Cancel</button>
+            <button class="btn btn-primary" @click="exportPDF" :disabled="isPrinting">
+              {{ isPrinting ? '⏳ Generating…' : '📄 Export PDF' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
     </NuxtLayout>
   </div>
 </template>
 
 <script setup lang="ts">
+import { jsPDF } from 'jspdf';
 import { useAuthStore } from '~/stores/auth';
+const { formatDatetime } = useDatetime();
 
 definePageMeta({ ssr: false });
 
@@ -498,12 +609,26 @@ const evtForm = ref({
 });
 
 // ─── Calendar form ────────────────────────────────────────────────────────────
-const calForm = ref({ name: '', color: '#3b82f6' });
+const calForm = ref({ name: '', color: '#3b82f6', url: '', username: '', password: '', editable: false });
 
-// ─── CalDAV form ──────────────────────────────────────────────────────────────
-const cdForm = ref({ name: '', url: '', color: '#8b5cf6', username: '', password: '', editable: false });
-const cdError = ref('');
+// ─── CalDAV wizard ────────────────────────────────────────────────────────────
+const RAINBOW = ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#8b5cf6','#ec4899'];
+
+interface CdCalendarEntry { href: string; name: string; color: string; editable: boolean; included: boolean; }
+
+const cdStep   = ref<1 | 2 | 3>(1);
+const cdCreds  = ref({ url: '', username: '', password: '' });
+const cdSelected = ref<CdCalendarEntry[]>([]);
+const cdError  = ref('');
 const isCdLoading = ref(false);
+
+// ─── Print state ──────────────────────────────────────────────────────────────
+const showPrintModal = ref(false);
+const printForm = ref<{ startDate: string; endDate: string; viewMode: 'day' | 'week' | 'month'; infoLevel: 'full' | 'title-time' | 'availability' }>({
+  startDate: '', endDate: '', viewMode: 'month', infoLevel: 'full',
+});
+const printError = ref('');
+const isPrinting = ref(false);
 
 // ─── Import/Export state ──────────────────────────────────────────────────────
 const exportCalId = ref('all');
@@ -696,6 +821,7 @@ function openEditEventModal(evt: CalEvent) {
 
 function saveEvent() {
   if (!evtForm.value.title.trim()) return;
+  if (editingEvent.value?.readOnly) return; // read-only events cannot be modified
   const tags = evtForm.value.tagsInput.split(',').map(t => t.trim()).filter(Boolean);
   const base = {
     title: evtForm.value.title,
@@ -729,6 +855,7 @@ function saveEvent() {
 
 function deleteCurrentEvent() {
   if (!editingEvent.value) return;
+  if (editingEvent.value.readOnly) return; // read-only events cannot be deleted
   const evt = editingEvent.value;
   events.value = events.value.filter(e => e.id !== evt.id);
   const cal = calendars.value.find(c => c.id === evt.calendarId);
@@ -758,13 +885,17 @@ function handleTimeGridClick(e: MouseEvent, day: Date) {
 
 function openAddCalendarModal() {
   editingCalendar.value = null;
-  calForm.value = { name: '', color: getRandomColor() };
+  calForm.value = { name: '', color: getRandomColor(), url: '', username: '', password: '', editable: false };
   showCalendarModal.value = true;
 }
 
 function openEditCalendarModal(cal: Calendar) {
   editingCalendar.value = cal;
-  calForm.value = { name: cal.name, color: cal.color };
+  calForm.value = {
+    name: cal.name, color: cal.color,
+    url: cal.subscriptionUrl ?? '', username: cal.username ?? '',
+    password: cal.password ?? '', editable: cal.editable ?? false,
+  };
   showCalendarModal.value = true;
 }
 
@@ -772,7 +903,16 @@ function saveCalendar() {
   if (!calForm.value.name.trim()) return;
   if (editingCalendar.value) {
     const idx = calendars.value.findIndex(c => c.id === editingCalendar.value!.id);
-    if (idx >= 0) calendars.value[idx] = { ...calendars.value[idx], name: calForm.value.name, color: calForm.value.color };
+    if (idx >= 0) {
+      const updates: Partial<Calendar> = { name: calForm.value.name, color: calForm.value.color };
+      if (calendars.value[idx].isSubscription) {
+        updates.subscriptionUrl = calForm.value.url || undefined;
+        updates.username = calForm.value.username || undefined;
+        updates.password = calForm.value.password || undefined;
+        updates.editable = calForm.value.editable;
+      }
+      calendars.value[idx] = { ...calendars.value[idx], ...updates };
+    }
   } else {
     calendars.value.push({ id: crypto.randomUUID(), name: calForm.value.name, color: calForm.value.color, visible: true, isSubscription: false });
   }
@@ -805,19 +945,20 @@ async function fetchViaProxy(url: string, username?: string, password?: string):
 }
 
 function openCalDAVModal() {
-  cdForm.value = { name: '', url: '', color: '#8b5cf6', username: '', password: '', editable: false };
+  cdStep.value = 1;
+  cdCreds.value = { url: '', username: '', password: '' };
+  cdSelected.value = [];
   cdError.value = '';
   showCalDAVModal.value = true;
 }
 
-async function subscribeCalDAV() {
-  if (!cdForm.value.name.trim() || !cdForm.value.url.trim()) {
-    cdError.value = 'Please provide a name and URL.';
+async function discoverCalendars() {
+  if (!cdCreds.value.url.trim()) {
+    cdError.value = 'Please enter a server URL.';
     return;
   }
-  // Basic URL validation – only allow http/https to prevent SSRF via other schemes
   try {
-    const p = new URL(cdForm.value.url);
+    const p = new URL(cdCreds.value.url);
     if (p.protocol !== 'http:' && p.protocol !== 'https:') {
       cdError.value = 'Only HTTP and HTTPS URLs are supported.';
       return;
@@ -829,34 +970,129 @@ async function subscribeCalDAV() {
   isCdLoading.value = true;
   cdError.value = '';
   try {
-    const icsText = await fetchViaProxy(cdForm.value.url, cdForm.value.username, cdForm.value.password);
-    const calId = crypto.randomUUID();
-    calendars.value.push({
-      id: calId, name: cdForm.value.name, color: cdForm.value.color,
-      visible: true, isSubscription: true, subscriptionUrl: cdForm.value.url,
-      username: cdForm.value.username || undefined, password: cdForm.value.password || undefined,
-      editable: cdForm.value.editable,
+    const discovered = await apiFetch<{ href: string; name: string; color: string | null }[]>('/caldav/discover', {
+      method: 'POST',
+      body: { url: cdCreds.value.url, username: cdCreds.value.username || undefined, password: cdCreds.value.password || undefined },
     });
-    importParsedEvents(parseICS(icsText), calId, !cdForm.value.editable);
-    saveToStorage();
-    showCalDAVModal.value = false;
+    cdSelected.value = discovered.map((d, i) => ({
+      href: d.href,
+      name: d.name,
+      color: d.color ?? RAINBOW[i % RAINBOW.length],
+      editable: false,
+      included: true,
+    }));
+    cdStep.value = 2;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    cdError.value = `Failed to fetch calendar: ${msg}`;
+    cdError.value = `Discovery failed: ${msg}`;
   } finally {
     isCdLoading.value = false;
   }
 }
 
+function cdGoToSummary() {
+  if (!cdSelected.value.some(c => c.included)) return;
+  cdError.value = '';
+  cdStep.value = 3;
+}
+
+async function subscribeAllCalDAV() {
+  isCdLoading.value = true;
+  cdError.value = '';
+  try {
+    for (const cal of cdSelected.value.filter(c => c.included)) {
+      const icsText = await fetchViaProxy(cal.href, cdCreds.value.username, cdCreds.value.password);
+      const calId = crypto.randomUUID();
+      calendars.value.push({
+        id: calId, name: cal.name, color: cal.color,
+        visible: true, isSubscription: true, subscriptionUrl: cal.href,
+        username: cdCreds.value.username || undefined, password: cdCreds.value.password || undefined,
+        editable: cal.editable,
+      });
+      importParsedEvents(parseICS(icsText), calId, !cal.editable);
+    }
+    saveToStorage();
+    showCalDAVModal.value = false;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    cdError.value = `Failed to subscribe: ${msg}`;
+  } finally {
+    isCdLoading.value = false;
+  }
+}
+
+// Keep legacy single-URL subscribe for backward compatibility (used internally by syncCalDAV-related paths)
+async function subscribeCalDAV() { /* replaced by wizard – subscribeAllCalDAV */ }
+
 async function syncCalDAV(cal: Calendar) {
   if (!cal.subscriptionUrl) return;
   try {
     const icsText = await fetchViaProxy(cal.subscriptionUrl, cal.username, cal.password);
-    events.value = events.value.filter(e => e.calendarId !== cal.id);
-    importParsedEvents(parseICS(icsText), cal.id, !cal.editable);
+    const parsed = parseICS(icsText);
+
+    // Build a set of UIDs present on the remote server
+    const remoteUids = new Set(parsed.filter(p => p.uid).map(p => p.uid!));
+
+    // Remove stale events from this subscription calendar:
+    // - Read-only: full refresh — remove ALL events for this calendar so remote is authoritative
+    // - Editable: keep locally-created events (no caldavUrl = not yet pushed), remove server-deleted ones
+    events.value = events.value.filter(e => {
+      if (e.calendarId !== cal.id) return true;
+      if (!cal.editable) return false; // read-only: always replace with remote
+      if (!e.caldavUrl) return true;   // editable + locally-created: keep
+      return remoteUids.has(e.uid);    // editable + synced: keep if still on server
+    });
+
+    // Merge remote events into local list
+    for (const pe of parsed) {
+      if (!pe.title) continue;
+      const existingIdx = events.value.findIndex(
+        e => e.calendarId === cal.id && e.uid === pe.uid,
+      );
+      if (existingIdx >= 0) {
+        // Update existing event from server data
+        const existing = events.value[existingIdx];
+        events.value[existingIdx] = {
+          ...existing,
+          title: pe.title,
+          description: pe.description ?? existing.description,
+          startDate: pe.startDate ?? existing.startDate,
+          startTime: pe.startTime ?? existing.startTime,
+          endDate: pe.endDate ?? existing.endDate,
+          endTime: pe.endTime ?? existing.endTime,
+          allDay: pe.allDay ?? existing.allDay,
+          location: pe.location ?? existing.location,
+          category: pe.category ?? existing.category,
+          tags: pe.tags ?? existing.tags,
+          caldavUrl: pe.caldavUrl ?? existing.caldavUrl,
+          readOnly: !cal.editable,
+        };
+      } else {
+        // New event from server — add it
+        events.value.push({
+          id: crypto.randomUUID(),
+          uid: pe.uid ?? `${crypto.randomUUID()}@ronbureau`,
+          calendarId: cal.id,
+          title: pe.title,
+          description: pe.description ?? '',
+          startDate: pe.startDate ?? dateStr(new Date()),
+          startTime: pe.startTime ?? '00:00',
+          endDate: pe.endDate ?? (pe.startDate ?? dateStr(new Date())),
+          endTime: pe.endTime ?? '23:59',
+          allDay: pe.allDay ?? false,
+          location: pe.location ?? '',
+          category: pe.category ?? '',
+          tags: pe.tags ?? [],
+          caldavUrl: pe.caldavUrl,
+          readOnly: !cal.editable,
+        });
+      }
+    }
+
     saveToStorage();
   } catch (err) {
     console.error('CalDAV sync failed:', err);
+    alert(`CalDAV sync failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -869,11 +1105,16 @@ async function syncEventToCalDAV(evt: CalEvent, cal: Calendar) {
   if (!cal.subscriptionUrl) return;
   try {
     const eventUrl = evt.caldavUrl ?? `${cal.subscriptionUrl.replace(/\/$/, '')}/${encodeURIComponent(evt.uid)}.ics`;
-    const headers: Record<string, string> = { 'Content-Type': 'text/calendar; charset=utf-8' };
-    if (cal.username && cal.password) {
-      headers['Authorization'] = `Basic ${btoa(`${cal.username}:${cal.password}`)}`;
-    }
-    await $fetch(eventUrl, { method: 'PUT', headers, body: generateICS([evt]) });
+    await apiFetch('/caldav/write', {
+      method: 'POST',
+      body: {
+        url: eventUrl,
+        method: 'PUT',
+        body: generateICS([evt]),
+        username: cal.username || undefined,
+        password: cal.password || undefined,
+      },
+    });
     if (!evt.caldavUrl) {
       const idx = events.value.findIndex(e => e.id === evt.id);
       if (idx >= 0) events.value[idx].caldavUrl = eventUrl;
@@ -881,19 +1122,25 @@ async function syncEventToCalDAV(evt: CalEvent, cal: Calendar) {
     }
   } catch (err) {
     console.error('CalDAV PUT failed:', err);
+    alert(`Failed to sync event to CalDAV server: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
 async function deleteFromCalDAV(evt: CalEvent, cal: Calendar) {
   if (!evt.caldavUrl) return;
   try {
-    const headers: Record<string, string> = {};
-    if (cal.username && cal.password) {
-      headers['Authorization'] = `Basic ${btoa(`${cal.username}:${cal.password}`)}`;
-    }
-    await $fetch(evt.caldavUrl, { method: 'DELETE', headers });
+    await apiFetch('/caldav/write', {
+      method: 'POST',
+      body: {
+        url: evt.caldavUrl,
+        method: 'DELETE',
+        username: cal.username || undefined,
+        password: cal.password || undefined,
+      },
+    });
   } catch (err) {
     console.error('CalDAV DELETE failed:', err);
+    alert(`Failed to delete event from CalDAV server: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -980,6 +1227,7 @@ function parseICS(content: string): ParsedICSEvent[] {
       case 'LOCATION':    cur.location = val; break;
       case 'CATEGORIES':  cur.category = val.split(',')[0].trim(); break;
       case 'X-TAGS':      cur.tags = val.split(',').map(t => t.trim()).filter(Boolean); break;
+      case 'X-CALDAV-URL': cur.caldavUrl = rawVal.trim(); break;
       case 'UID':         cur.uid = val; break;
       case 'DTSTART': {
         const dateOnly = params.includes('VALUE=DATE') && !params.includes('DATE-TIME');
@@ -1066,7 +1314,336 @@ function importICSFile(event: Event) {
 
 // ─── Print ────────────────────────────────────────────────────────────────────
 
-function printCalendar() { window.print(); }
+function openPrintModal() {
+  const fmt = auth.userPreferences?.datetimeFormat ?? 'ISO';
+  // Default date range from current view
+  let start: Date;
+  let end: Date;
+  if (currentView.value === 'day') {
+    start = new Date(currentDate.value);
+    end   = new Date(currentDate.value);
+  } else if (currentView.value === 'week') {
+    start = getWeekStart(currentDate.value);
+    end   = new Date(start); end.setDate(end.getDate() + 6);
+  } else {
+    const y = currentDate.value.getFullYear(), m = currentDate.value.getMonth();
+    start = new Date(y, m, 1);
+    end   = new Date(y, m + 1, 0);
+  }
+  printForm.value = {
+    startDate: dateStr(start),
+    endDate:   dateStr(end),
+    viewMode:  currentView.value,
+    infoLevel: 'full',
+  };
+  printError.value = '';
+  showPrintModal.value = true;
+}
+
+function formatPrintDate(d: Date): string {
+  const fmt = auth.userPreferences?.datetimeFormat ?? 'ISO';
+  switch (fmt) {
+    case 'US':    return d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+    case 'EU':    return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    case 'Short': return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    default:      return dateStr(d);
+  }
+}
+
+function getEventsForDate(dStr: string): CalEvent[] {
+  return events.value.filter(e => {
+    const cal = calendars.value.find(c => c.id === e.calendarId);
+    if (!cal?.visible) return false;
+    return e.startDate <= dStr && e.endDate >= dStr;
+  });
+}
+
+async function exportPDF() {
+  if (!printForm.value.startDate || !printForm.value.endDate) {
+    printError.value = 'Please set a date range.';
+    return;
+  }
+  if (printForm.value.startDate > printForm.value.endDate) {
+    printError.value = 'Start date must be before end date.';
+    return;
+  }
+  isPrinting.value = true;
+  printError.value = '';
+  try {
+    const { viewMode, infoLevel } = printForm.value;
+    const rangeStart = new Date(printForm.value.startDate + 'T00:00:00');
+    const rangeEnd   = new Date(printForm.value.endDate   + 'T00:00:00');
+    const userName   = auth.currentUser?.displayName ?? auth.currentUser?.userId ?? 'User';
+    const userId     = auth.currentUser?.userId ?? '';
+    const orgId      = auth.currentUser?.organizationId ?? '';
+    const titleStr   = `${formatPrintDate(rangeStart)} – ${formatPrintDate(rangeEnd)} calendar for ${userName}`;
+    const exportedAt = new Date().toLocaleString();
+    const footer     = `RonBureau  |  Organisation: ${orgId}  |  User: ${userId}  |  Exported: ${exportedAt}`;
+
+    const isLandscape = viewMode === 'week' || viewMode === 'month';
+    const doc = new jsPDF({ orientation: isLandscape ? 'landscape' : 'portrait', unit: 'mm', format: 'a4' });
+    const PW = isLandscape ? 297 : 210;  // page width
+    const PH = isLandscape ? 210 : 297;  // page height
+    const MAR = 10;
+    const TITLE_H = 14;
+    const FOOT_H  = 8;
+    const BODY_Y  = MAR + TITLE_H;
+    const BODY_H  = PH - BODY_Y - MAR - FOOT_H;
+
+    function drawTitleFooter(pageTitle: string) {
+      // Title
+      doc.setFontSize(11); doc.setFont('helvetica', 'bold');
+      doc.text(pageTitle, MAR, MAR + 8);
+      // Footer line
+      doc.setDrawColor(180); doc.setLineWidth(0.3);
+      doc.line(MAR, PH - MAR - FOOT_H, PW - MAR, PH - MAR - FOOT_H);
+      doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(120);
+      doc.text(footer, MAR, PH - MAR - 2);
+      doc.setTextColor(0);
+    }
+
+    let firstPage = true;
+
+    if (viewMode === 'day') {
+      // ── Day view: one page per day, hourly grid ──────────────────────────────
+      const HOURS = 24;
+      const TIME_W = 18;
+      const EVT_X  = MAR + TIME_W;
+      const EVT_W  = PW - MAR - TIME_W - MAR;
+      const rowH   = BODY_H / HOURS;
+
+      let cur = new Date(rangeStart);
+      while (cur <= rangeEnd) {
+        if (!firstPage) doc.addPage();
+        firstPage = false;
+        const dStr = dateStr(cur);
+        const pageTitle = `${titleStr}  ·  ${formatPrintDate(cur)}`;
+        drawTitleFooter(pageTitle);
+
+        // Draw hour rows
+        doc.setFontSize(6.5); doc.setFont('helvetica', 'normal'); doc.setDrawColor(220);
+        for (let h = 0; h < HOURS; h++) {
+          const y = BODY_Y + h * rowH;
+          doc.setTextColor(140); doc.text(formatHour(h), MAR, y + rowH * 0.65);
+          doc.setDrawColor(220); doc.setLineWidth(0.2); doc.line(MAR + TIME_W - 2, y, PW - MAR, y);
+        }
+        doc.setTextColor(0);
+
+        // Draw events
+        const dayEvts = getEventsForDate(dStr);
+        for (const evt of dayEvts) {
+          const cal = calendars.value.find(c => c.id === evt.calendarId);
+          const color = cal?.color ?? '#3b82f6';
+          const [rr, gg, bb] = hexToRgb(color);
+          const startMin = evt.allDay ? 0  : (parseInt(evt.startTime.split(':')[0]) * 60 + parseInt(evt.startTime.split(':')[1]));
+          const endMin   = evt.allDay ? 1440 : (parseInt(evt.endTime.split(':')[0]) * 60   + parseInt(evt.endTime.split(':')[1]));
+          const y1 = BODY_Y + (startMin / 60) * rowH;
+          const h1 = Math.max(((endMin - startMin) / 60) * rowH, rowH * 0.5);
+          doc.setFillColor(rr, gg, bb); doc.setAlpha ? doc.setAlpha(0.85) : null;
+          doc.roundedRect(EVT_X + 1, y1 + 0.5, EVT_W - 2, h1 - 1, 1, 1, 'F');
+          if (infoLevel !== 'availability' && h1 > 3) {
+            doc.setFontSize(6); doc.setTextColor(255);
+            const lines: string[] = [];
+            if (infoLevel === 'full' || infoLevel === 'title-time') lines.push(evt.title);
+            if (infoLevel === 'title-time' && !evt.allDay) lines.push(`${evt.startTime}–${evt.endTime}`);
+            if (infoLevel === 'full') {
+              if (!evt.allDay) lines.push(`${evt.startTime}–${evt.endTime}`);
+              if (evt.location) lines.push(`📍 ${evt.location}`);
+              if (evt.category) lines.push(`🏷️ ${evt.category}`);
+            }
+            lines.forEach((l, i) => { if (y1 + 2 + i * 3.5 < y1 + h1 - 1) doc.text(l.slice(0, 40), EVT_X + 2, y1 + 2.5 + i * 3.5); });
+            doc.setTextColor(0);
+          }
+        }
+        cur.setDate(cur.getDate() + 1);
+      }
+
+    } else if (viewMode === 'week') {
+      // ── Week view: one page per week, days as rows, 24h columns ─────────────
+      const HOURS = 24;
+      const LABEL_W = 22;
+      const TIME_H  = 6;
+      const rowH    = (BODY_H - TIME_H) / 7;
+      const colW    = (PW - 2 * MAR - LABEL_W) / HOURS;
+
+      // Find first Monday ≤ rangeStart
+      let weekStart = new Date(rangeStart);
+      const dow = weekStart.getDay();
+      weekStart.setDate(weekStart.getDate() - (dow === 0 ? 6 : dow - 1));
+
+      while (weekStart <= rangeEnd) {
+        const weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate() + 6);
+        if (!firstPage) doc.addPage();
+        firstPage = false;
+        drawTitleFooter(titleStr);
+
+        const timeAxisX = MAR + LABEL_W;
+        // Hour headers
+        doc.setFontSize(5.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(120);
+        for (let h = 0; h < HOURS; h++) {
+          doc.text(h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h-12}p`,
+            timeAxisX + h * colW, BODY_Y + TIME_H - 1, { align: 'left' });
+        }
+        doc.setTextColor(0);
+
+        // Day rows
+        for (let d = 0; d < 7; d++) {
+          const day = new Date(weekStart); day.setDate(day.getDate() + d);
+          const dStr = dateStr(day);
+          const y = BODY_Y + TIME_H + d * rowH;
+          const inRange = dStr >= dateStr(rangeStart) && dStr <= dateStr(rangeEnd);
+
+          // Row bg
+          if (!inRange) { doc.setFillColor(248, 248, 248); doc.rect(MAR, y, PW - 2 * MAR, rowH, 'F'); }
+          // Day label
+          doc.setFontSize(6.5); doc.setFont('helvetica', inRange ? 'bold' : 'normal'); doc.setTextColor(inRange ? 0 : 160);
+          doc.text(`${day.toLocaleDateString('en-US', { weekday: 'short' })} ${day.getDate()}`, MAR + 1, y + rowH * 0.6);
+          // Hour grid lines
+          doc.setDrawColor(220); doc.setLineWidth(0.15);
+          for (let h = 0; h <= HOURS; h++) doc.line(timeAxisX + h * colW, y, timeAxisX + h * colW, y + rowH);
+          doc.line(MAR, y + rowH, PW - MAR, y + rowH);
+
+          if (!inRange) continue;
+          // Events
+          const dayEvts = getEventsForDate(dStr);
+          for (const evt of dayEvts) {
+            const cal = calendars.value.find(c => c.id === evt.calendarId);
+            const color = cal?.color ?? '#3b82f6';
+            const [rr, gg, bb] = hexToRgb(color);
+            const startMin = evt.allDay ? 0    : (parseInt(evt.startTime.split(':')[0]) * 60 + parseInt(evt.startTime.split(':')[1]));
+            const endMin   = evt.allDay ? 1440 : (parseInt(evt.endTime.split(':')[0])   * 60 + parseInt(evt.endTime.split(':')[1]));
+            const x1 = timeAxisX + (startMin / 60) * colW;
+            const w1 = Math.max(((endMin - startMin) / 60) * colW, colW * 0.5);
+            doc.setFillColor(rr, gg, bb);
+            doc.roundedRect(x1 + 0.3, y + 1, w1 - 0.6, rowH - 2, 0.8, 0.8, 'F');
+            if (infoLevel !== 'availability' && w1 > 8) {
+              doc.setFontSize(5); doc.setTextColor(255);
+              const label = infoLevel === 'full'
+                ? `${evt.title}${!evt.allDay ? ' ' + evt.startTime : ''}`
+                : evt.title;
+              doc.text(label.slice(0, 20), x1 + 1, y + rowH / 2 + 1.5);
+              doc.setTextColor(0);
+            }
+          }
+        }
+        weekStart.setDate(weekStart.getDate() + 7);
+      }
+
+    } else {
+      // ── Month view: one page per month, 7-column grid ────────────────────────
+      const CELL_LABEL_H = 5;
+      const DAY_HDR_H    = 6;
+      const gridY        = BODY_Y + DAY_HDR_H;
+      const gridH        = BODY_H - DAY_HDR_H;
+      const colW         = (PW - 2 * MAR) / 7;
+      const dayNames     = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+      // Iterate months in range
+      let mDate = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1);
+      const mEnd  = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), 1);
+
+      while (mDate <= mEnd) {
+        if (!firstPage) doc.addPage();
+        firstPage = false;
+        const mLabel = mDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+        drawTitleFooter(`${titleStr}  ·  ${mLabel}`);
+
+        // Day-of-week headers
+        doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(80);
+        dayNames.forEach((n, i) => doc.text(n, MAR + i * colW + colW / 2, BODY_Y + DAY_HDR_H - 1, { align: 'center' }));
+        doc.setTextColor(0);
+
+        // Build month cells (Mon-based)
+        const y = mDate.getFullYear(), mo = mDate.getMonth();
+        const firstDay = new Date(y, mo, 1);
+        const lastDay  = new Date(y, mo + 1, 0);
+        let startDow = firstDay.getDay() - 1; if (startDow < 0) startDow = 6;
+        const cells: Date[] = [];
+        for (let i = startDow - 1; i >= 0; i--) cells.push(new Date(y, mo, -i));
+        for (let d = 1; d <= lastDay.getDate(); d++) cells.push(new Date(y, mo, d));
+        while (cells.length % 7 !== 0 || cells.length < 35) {
+          const prev = cells[cells.length - 1];
+          const next = new Date(prev); next.setDate(next.getDate() + 1);
+          cells.push(next);
+        }
+        const rows = cells.length / 7;
+        const cellH = gridH / rows;
+        const EVT_H = 3.5;
+        const MAX_EVTS = Math.floor((cellH - CELL_LABEL_H - 1) / (EVT_H + 0.5));
+
+        for (let i = 0; i < cells.length; i++) {
+          const cell = cells[i];
+          const col  = i % 7;
+          const row  = Math.floor(i / 7);
+          const cx   = MAR + col * colW;
+          const cy   = gridY + row * cellH;
+          const isThisMonth = cell.getMonth() === mo;
+          const dStr = dateStr(cell);
+
+          // Cell border
+          doc.setDrawColor(200); doc.setLineWidth(0.25);
+          doc.rect(cx, cy, colW, cellH, 'S');
+
+          // Cell bg for out-of-month
+          if (!isThisMonth) { doc.setFillColor(250, 250, 250); doc.rect(cx, cy, colW, cellH, 'F'); }
+
+          // Today highlight
+          if (dStr === dateStr(new Date())) {
+            doc.setFillColor(219, 234, 254); doc.roundedRect(cx + 0.5, cy + 0.5, colW - 1, cellH - 1, 1, 1, 'F');
+          }
+
+          // Date number
+          doc.setFontSize(7); doc.setFont('helvetica', isThisMonth ? 'bold' : 'normal');
+          doc.setTextColor(isThisMonth ? 40 : 180);
+          doc.text(String(cell.getDate()), cx + colW - 2, cy + 4.5, { align: 'right' });
+          doc.setTextColor(0);
+
+          // Events
+          const dayEvts = getEventsForDate(dStr).slice(0, MAX_EVTS);
+          dayEvts.forEach((evt, ei) => {
+            const cal = calendars.value.find(c => c.id === evt.calendarId);
+            const color = cal?.color ?? '#3b82f6';
+            const [rr, gg, bb] = hexToRgb(color);
+            const ey = cy + CELL_LABEL_H + 1 + ei * (EVT_H + 0.5);
+            doc.setFillColor(rr, gg, bb);
+            doc.roundedRect(cx + 1, ey, colW - 2, EVT_H, 0.5, 0.5, 'F');
+            if (infoLevel !== 'availability') {
+              doc.setFontSize(4.5); doc.setTextColor(255);
+              const label = infoLevel === 'full'
+                ? `${evt.allDay ? '' : evt.startTime + ' '}${evt.title}`
+                : evt.title;
+              doc.text(label.slice(0, 22), cx + 2, ey + EVT_H - 1);
+              doc.setTextColor(0);
+            }
+          });
+          const overflow = getEventsForDate(dStr).length - MAX_EVTS;
+          if (overflow > 0) {
+            doc.setFontSize(4.5); doc.setTextColor(100);
+            doc.text(`+${overflow} more`, cx + 2, cy + cellH - 1.5);
+            doc.setTextColor(0);
+          }
+        }
+        mDate.setMonth(mDate.getMonth() + 1);
+      }
+    }
+
+    const fileName = `calendar_${printForm.value.startDate}_${printForm.value.endDate}.pdf`;
+    doc.save(fileName);
+    showPrintModal.value = false;
+  } catch (err: unknown) {
+    printError.value = `Failed to generate PDF: ${err instanceof Error ? err.message : String(err)}`;
+  } finally {
+    isPrinting.value = false;
+  }
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+  const clean = hex.replace('#', '');
+  const num   = parseInt(clean.length === 3
+    ? clean.split('').map(c => c + c).join('')
+    : clean, 16);
+  return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+}
 
 // ─── Persistence ──────────────────────────────────────────────────────────────
 
@@ -1517,10 +2094,38 @@ onMounted(() => {
 }
 .status-msg.success { background: rgba(34,197,94,0.1); color: var(--color-success); }
 .status-msg.error   { background: rgba(239,68,68,0.1);  color: var(--color-error); }
+.status-msg.warn-msg { background: rgba(234,179,8,0.1); color: var(--color-warning); }
 
 /* Utility */
 .w-full { width: 100%; }
 .btn-sm { padding: 0.4rem 0.75rem; font-size: 0.8rem; }
+
+/* ── CalDAV Wizard ───────────────────────────────────────────────────────────*/
+.modal-wide { max-width: 560px; }
+.wizard-steps {
+  display: flex; align-items: center; gap: 0.4rem;
+  margin: 0.5rem 0 1rem; flex-wrap: wrap;
+}
+.wizard-step {
+  font-size: 0.78rem; font-weight: 500; color: var(--color-text-muted);
+  padding: 0.2rem 0.5rem; border-radius: 20px;
+  border: 1px solid var(--color-border);
+}
+.wizard-step.active { color: var(--color-primary); border-color: var(--color-primary); background: rgba(59,130,246,0.07); font-weight: 700; }
+.wizard-step.done   { color: var(--color-success);  border-color: var(--color-success);  background: rgba(34,197,94,0.07); }
+.wizard-sep { font-size: 0.8rem; color: var(--color-text-muted); }
+
+.cd-calendar-list { display: flex; flex-direction: column; gap: 0.5rem; max-height: 280px; overflow-y: auto; margin: 0.5rem 0; }
+.cd-calendar-row  { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.5rem; border-radius: var(--radius); border: 1px solid var(--color-border); }
+.cd-cal-check     { display: flex; align-items: center; }
+.cd-cal-name      { flex: 1; min-width: 0; }
+.cd-mode-label    { display: flex; align-items: center; gap: 0.3rem; font-size: 0.78rem; white-space: nowrap; cursor: pointer; color: var(--color-text); }
+.cd-mode-disabled { opacity: 0.45; pointer-events: none; }
+
+.cd-summary-list { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.5rem 0; }
+.cd-summary-row  { display: flex; align-items: center; gap: 0.6rem; font-size: 0.875rem; }
+.cd-sum-name     { flex: 1; font-weight: 500; }
+.cd-sum-badge    { font-size: 0.75rem; color: var(--color-text-muted); }
 
 /* ── Print ───────────────────────────────────────────────────────────────────*/
 @media print {

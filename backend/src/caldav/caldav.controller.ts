@@ -10,8 +10,27 @@ import {
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { IsString, IsUrl, IsOptional, IsIn, validateOrReject } from 'class-validator';
 
+interface DiscoveredCalendar {
+  href: string;
+  name: string;
+  color: string | null;
+}
+
 class ProxyRequestDto {
-  @IsUrl({ protocols: ['http', 'https'], require_tld: true })
+  @IsUrl({ protocols: ['http', 'https'], require_tld: false })
+  url: string;
+
+  @IsOptional()
+  @IsString()
+  username?: string;
+
+  @IsOptional()
+  @IsString()
+  password?: string;
+}
+
+class DiscoverRequestDto {
+  @IsUrl({ protocols: ['http', 'https'], require_tld: false })
   url: string;
 
   @IsOptional()
@@ -24,7 +43,7 @@ class ProxyRequestDto {
 }
 
 class ProxyWriteDto {
-  @IsUrl({ protocols: ['http', 'https'], require_tld: true })
+  @IsUrl({ protocols: ['http', 'https'], require_tld: false })
   url: string;
 
   @IsIn(['PUT', 'DELETE'])
@@ -233,6 +252,164 @@ export class CalDavController {
     }
 
     return { status: response.status, statusText: response.statusText };
+  }
+
+  @Post('discover')
+  async discoverCalendars(@Body() dto: DiscoverRequestDto): Promise<DiscoveredCalendar[]> {
+    const dtoObj = Object.assign(new DiscoverRequestDto(), dto);
+    try {
+      await validateOrReject(dtoObj);
+    } catch {
+      throw new BadRequestException('Invalid request parameters');
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(dto.url);
+    } catch {
+      throw new BadRequestException('Invalid URL');
+    }
+
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new BadRequestException('Only http and https URLs are supported');
+    }
+
+    const hostname = parsed.hostname.toLowerCase();
+    if (this.isPrivateHost(hostname)) {
+      throw new BadRequestException('Requests to private network addresses are not allowed');
+    }
+
+    const authHeaders: Record<string, string> = {};
+    if (dto.username && dto.password) {
+      authHeaders['Authorization'] =
+        'Basic ' + Buffer.from(`${dto.username}:${dto.password}`).toString('base64');
+    }
+
+    // Strategy 1: PROPFIND Depth:1 on the given URL to find calendar collections
+    const calendars = await this.propfindCalendars(parsed.href, authHeaders);
+    if (calendars.length > 0) return calendars;
+
+    // Strategy 2: Discover via well-known → current-user-principal → calendar-home-set
+    try {
+      const wellKnownUrl = `${parsed.protocol}//${parsed.host}/.well-known/caldav`;
+      let principalUrl = await this.resolvePrincipalUrl(wellKnownUrl, authHeaders, parsed);
+      if (!principalUrl) {
+        principalUrl = await this.resolvePrincipalUrl(parsed.href, authHeaders, parsed);
+      }
+      if (principalUrl) {
+        const homeUrl = await this.resolveCalendarHomeSet(principalUrl, authHeaders, parsed);
+        if (homeUrl) {
+          const discovered = await this.propfindCalendars(homeUrl, authHeaders);
+          if (discovered.length > 0) return discovered;
+        }
+      }
+    } catch { /* ignore discovery errors */ }
+
+    // Strategy 3: Fallback — treat the given URL as a single calendar
+    return [{ href: dto.url, name: 'Calendar', color: null }];
+  }
+
+  private async propfindCalendars(
+    url: string,
+    headers: Record<string, string>,
+  ): Promise<DiscoveredCalendar[]> {
+    const body = `<?xml version="1.0" encoding="utf-8"?>
+<D:propfind xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav" xmlns:CS="http://calendarserver.org/ns/" xmlns:ICAL="http://apple.com/ns/ical/">
+  <D:prop>
+    <D:resourcetype/>
+    <D:displayname/>
+    <ICAL:calendar-color/>
+    <CS:getctag/>
+  </D:prop>
+</D:propfind>`;
+    let response: globalThis.Response;
+    try {
+      response = await fetch(url, {
+        method: 'PROPFIND',
+        headers: { ...headers, 'Content-Type': 'application/xml; charset=utf-8', Depth: '1' },
+        body,
+      });
+    } catch {
+      return [];
+    }
+    if (!response.ok) return [];
+    const xml = await response.text();
+    return this.parseCalendarCollections(xml, url);
+  }
+
+  private parseCalendarCollections(xml: string, baseUrl: string): DiscoveredCalendar[] {
+    const parsed = new URL(baseUrl);
+    const results: DiscoveredCalendar[] = [];
+    const responseRe = /<[^:>]*:?response[^>]*>([\s\S]*?)<\/[^:>]*:?response>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = responseRe.exec(xml)) !== null) {
+      const block = m[1];
+      // Only include resources whose <resourcetype> contains a calendar element.
+      // We extract the resourcetype block first to avoid false-positives from
+      // property tags like <x1:calendar-color .../> that appear in 404 propstat blocks.
+      const rtMatch = /<[^:>]*:?resourcetype[^>]*>([\s\S]*?)<\/[^:>]*:?resourcetype>/i.exec(block);
+      if (!rtMatch || !/<[^:>]*:?calendar[\s/>]/i.test(rtMatch[1])) continue;
+      const hrefMatch = /<[^:>]*:?href[^>]*>(.*?)<\/[^:>]*:?href>/i.exec(block);
+      if (!hrefMatch) continue;
+      const href = hrefMatch[1].trim();
+      const fullHref = href.startsWith('http') ? href : `${parsed.protocol}//${parsed.host}${href}`;
+      const nameMatch = /<[^:>]*:?displayname[^>]*>(.*?)<\/[^:>]*:?displayname>/i.exec(block);
+      const name = nameMatch ? this.unescapeXml(nameMatch[1].trim()) : 'Calendar';
+      const colorMatch = /<[^:>]*:?calendar-color[^>]*>(.*?)<\/[^:>]*:?calendar-color>/i.exec(block);
+      const color = colorMatch ? this.unescapeXml(colorMatch[1].trim()).replace(/FF$/i, '') : null;
+      results.push({ href: fullHref, name: name || 'Calendar', color });
+    }
+    return results;
+  }
+
+  private async resolvePrincipalUrl(
+    url: string,
+    headers: Record<string, string>,
+    base: URL,
+  ): Promise<string | null> {
+    const body = `<?xml version="1.0" encoding="utf-8"?>
+<D:propfind xmlns:D="DAV:"><D:prop><D:current-user-principal/></D:prop></D:propfind>`;
+    try {
+      const response = await fetch(url, {
+        method: 'PROPFIND',
+        headers: { ...headers, 'Content-Type': 'application/xml; charset=utf-8', Depth: '0' },
+        body,
+      });
+      if (!response.ok) return null;
+      const xml = await response.text();
+      const match = /<[^:>]*:?current-user-principal[^>]*>[\s\S]*?<[^:>]*:?href[^>]*>(.*?)<\/[^:>]*:?href>/i.exec(xml);
+      if (!match) return null;
+      const href = match[1].trim();
+      return href.startsWith('http') ? href : `${base.protocol}//${base.host}${href}`;
+    } catch {
+      return null;
+    }
+  }
+
+  private async resolveCalendarHomeSet(
+    principalUrl: string,
+    headers: Record<string, string>,
+    base: URL,
+  ): Promise<string | null> {
+    const body = `<?xml version="1.0" encoding="utf-8"?>
+<D:propfind xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:prop><C:calendar-home-set/></D:prop>
+</D:propfind>`;
+    try {
+      const response = await fetch(principalUrl, {
+        method: 'PROPFIND',
+        headers: { ...headers, 'Content-Type': 'application/xml; charset=utf-8', Depth: '0' },
+        body,
+      });
+      if (!response.ok) return null;
+      const xml = await response.text();
+      const match = /<[^:>]*:?calendar-home-set[^>]*>[\s\S]*?<[^:>]*:?href[^>]*>(.*?)<\/[^:>]*:?href>/i.exec(xml);
+      if (!match) return null;
+      const href = match[1].trim();
+      return href.startsWith('http') ? href : `${base.protocol}//${base.host}${href}`;
+    } catch {
+      return null;
+    }
   }
 
   private unescapeXml(text: string): string {
