@@ -8,11 +8,31 @@ import {
   Header,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { IsString, IsUrl, IsOptional, validateOrReject } from 'class-validator';
+import { IsString, IsUrl, IsOptional, IsIn, validateOrReject } from 'class-validator';
 
 class ProxyRequestDto {
   @IsUrl({ protocols: ['http', 'https'], require_tld: true })
   url: string;
+
+  @IsOptional()
+  @IsString()
+  username?: string;
+
+  @IsOptional()
+  @IsString()
+  password?: string;
+}
+
+class ProxyWriteDto {
+  @IsUrl({ protocols: ['http', 'https'], require_tld: true })
+  url: string;
+
+  @IsIn(['PUT', 'DELETE'])
+  method: 'PUT' | 'DELETE';
+
+  @IsOptional()
+  @IsString()
+  body?: string;
 
   @IsOptional()
   @IsString()
@@ -114,10 +134,33 @@ export class CalDavController {
       if (reportRes.ok) {
         const xmlText = await reportRes.text();
         const veventBlocks: string[] = [];
-        const re = /BEGIN:VEVENT[\s\S]*?END:VEVENT/g;
-        let m: RegExpExecArray | null;
-        while ((m = re.exec(xmlText)) !== null) {
-          veventBlocks.push(this.unescapeXml(m[0]));
+        // Parse per <D:response> block to correlate href with each VEVENT
+        const responseRe = /<D:response>([\s\S]*?)<\/D:response>/gi;
+        let responseMatch: RegExpExecArray | null;
+        while ((responseMatch = responseRe.exec(xmlText)) !== null) {
+          const responseBlock = responseMatch[1];
+          const hrefMatch = /<D:href>(.*?)<\/D:href>/i.exec(responseBlock);
+          const href = hrefMatch ? hrefMatch[1].trim() : null;
+          const fullHref = href
+            ? (href.startsWith('http') ? href : `${parsed.protocol}//${parsed.host}${href}`)
+            : null;
+          const veRe = /BEGIN:VEVENT[\s\S]*?END:VEVENT/g;
+          let m: RegExpExecArray | null;
+          while ((m = veRe.exec(responseBlock)) !== null) {
+            let vevent = this.unescapeXml(m[0]);
+            if (fullHref) {
+              vevent = vevent.replace('END:VEVENT', `X-CALDAV-URL:${fullHref}\r\nEND:VEVENT`);
+            }
+            veventBlocks.push(vevent);
+          }
+        }
+        // Fallback: no <D:response> wrappers, extract VEVENTs directly
+        if (veventBlocks.length === 0) {
+          const re = /BEGIN:VEVENT[\s\S]*?END:VEVENT/g;
+          let m: RegExpExecArray | null;
+          while ((m = re.exec(xmlText)) !== null) {
+            veventBlocks.push(this.unescapeXml(m[0]));
+          }
         }
         if (veventBlocks.length > 0) {
           return [
@@ -135,6 +178,61 @@ export class CalDavController {
       'The URL did not return a valid iCalendar file. ' +
         'For Nextcloud/ownCloud, try appending "?export" to the URL.',
     );
+  }
+
+  @Post('write')
+  async proxyWrite(@Body() dto: ProxyWriteDto): Promise<{ status: number; statusText: string }> {
+    const dtoObj = Object.assign(new ProxyWriteDto(), dto);
+    try {
+      await validateOrReject(dtoObj);
+    } catch {
+      throw new BadRequestException('Invalid request parameters');
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(dto.url);
+    } catch {
+      throw new BadRequestException('Invalid URL');
+    }
+
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new BadRequestException('Only http and https URLs are supported');
+    }
+
+    const hostname = parsed.hostname.toLowerCase();
+    if (this.isPrivateHost(hostname)) {
+      throw new BadRequestException('Requests to private network addresses are not allowed');
+    }
+
+    const headers: Record<string, string> = {};
+    if (dto.username && dto.password) {
+      headers['Authorization'] =
+        'Basic ' + Buffer.from(`${dto.username}:${dto.password}`).toString('base64');
+    }
+    if (dto.method === 'PUT') {
+      headers['Content-Type'] = 'text/calendar; charset=utf-8';
+    }
+
+    let response: globalThis.Response;
+    try {
+      response = await fetch(parsed.toString(), {
+        method: dto.method,
+        headers,
+        ...(dto.method === 'PUT' && dto.body ? { body: dto.body } : {}),
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new InternalServerErrorException(`CalDAV write failed: ${msg}`);
+    }
+
+    if (!response.ok && response.status !== 204) {
+      throw new InternalServerErrorException(
+        `Remote server responded with ${response.status} ${response.statusText}`,
+      );
+    }
+
+    return { status: response.status, statusText: response.statusText };
   }
 
   private unescapeXml(text: string): string {
