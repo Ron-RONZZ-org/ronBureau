@@ -28,10 +28,10 @@ class ProxyRequestDto {
 export class CalDavController {
   @Post('proxy')
   @Header('Content-Type', 'text/calendar; charset=utf-8')
-  async proxyFetch(@Body() body: ProxyRequestDto): Promise<string> {
-    const dto = Object.assign(new ProxyRequestDto(), body);
+  async proxyFetch(@Body() dto: ProxyRequestDto): Promise<string> {
+    const dtoObj = Object.assign(new ProxyRequestDto(), dto);
     try {
-      await validateOrReject(dto);
+      await validateOrReject(dtoObj);
     } catch {
       throw new BadRequestException('Invalid request parameters');
     }
@@ -74,7 +74,76 @@ export class CalDavController {
       );
     }
 
-    return response.text();
+    const icsBody = await response.text();
+
+    // If the response is valid ICS, return it directly
+    if (icsBody.includes('BEGIN:VCALENDAR')) {
+      return icsBody;
+    }
+
+    // Fallback 1: append ?export (Nextcloud / ownCloud pattern)
+    const exportUrl = parsed.href.includes('?')
+      ? `${parsed.href}&export`
+      : `${parsed.href}?export`;
+    try {
+      const exportRes = await fetch(exportUrl, { headers });
+      if (exportRes.ok) {
+        const exportBody = await exportRes.text();
+        if (exportBody.includes('BEGIN:VCALENDAR')) {
+          return exportBody;
+        }
+      }
+    } catch { /* ignore */ }
+
+    // Fallback 2: CalDAV calendar-query REPORT (standard CalDAV protocol)
+    const reportBody = `<?xml version="1.0" encoding="utf-8" ?>
+<C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:prop><C:calendar-data/></D:prop>
+  <C:filter>
+    <C:comp-filter name="VCALENDAR">
+      <C:comp-filter name="VEVENT"/>
+    </C:comp-filter>
+  </C:filter>
+</C:calendar-query>`;
+    try {
+      const reportRes = await fetch(parsed.href, {
+        method: 'REPORT',
+        headers: { ...headers, 'Content-Type': 'application/xml; charset=utf-8', Depth: '1' },
+        body: reportBody,
+      });
+      if (reportRes.ok) {
+        const xmlText = await reportRes.text();
+        const veventBlocks: string[] = [];
+        const re = /BEGIN:VEVENT[\s\S]*?END:VEVENT/g;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(xmlText)) !== null) {
+          veventBlocks.push(this.unescapeXml(m[0]));
+        }
+        if (veventBlocks.length > 0) {
+          return [
+            'BEGIN:VCALENDAR',
+            'VERSION:2.0',
+            'PRODID:-//RonBureau//CalDAV Proxy//EN',
+            ...veventBlocks,
+            'END:VCALENDAR',
+          ].join('\r\n');
+        }
+      }
+    } catch { /* ignore */ }
+
+    throw new InternalServerErrorException(
+      'The URL did not return a valid iCalendar file. ' +
+        'For Nextcloud/ownCloud, try appending "?export" to the URL.',
+    );
+  }
+
+  private unescapeXml(text: string): string {
+    return text
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'");
   }
 
   private isPrivateHost(hostname: string): boolean {
