@@ -10,6 +10,10 @@
           <div class="sidebar-section">
             <div class="sidebar-section-header">
               <h3>📅 My Calendars</h3>
+              <div class="sidebar-hdr-actions">
+                <button class="link-btn" @click="setAllCalendarsVisible(true)" title="Show all">✓All</button>
+                <button class="link-btn" @click="setAllCalendarsVisible(false)" title="Hide all">✗All</button>
+              </div>
             </div>
             <ul class="calendar-list">
               <li v-for="cal in calendars" :key="cal.id" class="calendar-item">
@@ -50,10 +54,28 @@
             </div>
           </div>
 
+          <!-- Zoom Level -->
+          <div class="sidebar-section">
+            <h3>🔍 Zoom</h3>
+            <div class="zoom-row">
+              <span class="zoom-label">−</span>
+              <input type="range" min="30" max="150" step="5" v-model.number="zoomLevel" class="zoom-slider" title="Vertical zoom (hour height)" />
+              <span class="zoom-label">＋</span>
+              <span class="zoom-value">{{ zoomLevel }}px</span>
+            </div>
+          </div>
+
           <!-- Import / Export -->
           <div class="sidebar-section">
-            <button class="btn btn-outline btn-sm w-full" @click="showImportExportModal = true">
+            <button class="btn btn-outline btn-sm w-full" @click="openImportExportModal">
               📁 Import / Export ICS
+            </button>
+          </div>
+
+          <!-- Settings -->
+          <div class="sidebar-section">
+            <button class="btn btn-outline btn-sm w-full" @click="showSettingsModal = true">
+              ⚙️ Settings
             </button>
           </div>
         </aside>
@@ -104,7 +126,7 @@
                     :title="buildEventTooltip(evt)"
                   >
                     <span v-if="visibility.time && !evt.allDay" class="chip-time">{{ evt.startTime }}</span>
-                    <span v-if="visibility.title" class="chip-title">{{ evt.title }}</span>
+                    <span v-if="visibility.title" :class="['chip-title', { 'text-wrap': calSettings.textWrap }]">{{ evt.title }}</span>
                     <span v-if="visibility.location && evt.location" class="chip-loc">📍{{ evt.location }}</span>
                     <span v-if="visibility.category && evt.category" class="chip-cat">· {{ evt.category }}</span>
                   </div>
@@ -146,8 +168,8 @@
               </div>
             </div>
             <!-- Time grid -->
-            <div class="time-grid-scroll">
-              <div class="time-grid-inner">
+            <div class="time-grid-scroll" ref="timeGridScrollRef">
+              <div class="time-grid-inner" :style="{ '--hour-px': zoomLevel + 'px' }">
                 <div class="tg-gutter">
                   <div v-for="h in 24" :key="h" class="tg-hour-label">{{ formatHour(h - 1) }}</div>
                 </div>
@@ -163,11 +185,11 @@
                       v-for="evt in timedEventsForDate(day)"
                       :key="evt.id"
                       class="tg-event"
-                      :style="timedEventStyle(evt, day)"
+                      :style="timedEventStyleWithOverlap(evt, day)"
                       @click.stop="openEditEventModal(evt)"
                       :title="buildEventTooltip(evt)"
                     >
-                      <span v-if="visibility.title" class="tge-title">{{ evt.title }}</span>
+                      <span v-if="visibility.title" :class="['tge-title', { 'text-wrap': calSettings.textWrap }]">{{ evt.title }}</span>
                       <span v-if="visibility.time" class="tge-time">{{ evt.startTime }}–{{ evt.endTime }}</span>
                       <span v-if="visibility.location && evt.location" class="tge-loc">📍{{ evt.location }}</span>
                       <span v-if="visibility.category && evt.category" class="tge-cat">{{ evt.category }}</span>
@@ -199,8 +221,8 @@
                 >{{ evt.title }}</div>
               </div>
             </div>
-            <div class="time-grid-scroll">
-              <div class="time-grid-inner">
+            <div class="time-grid-scroll" ref="timeGridScrollRef">
+              <div class="time-grid-inner" :style="{ '--hour-px': zoomLevel + 'px' }">
                 <div class="tg-gutter">
                   <div v-for="h in 24" :key="h" class="tg-hour-label">{{ formatHour(h - 1) }}</div>
                 </div>
@@ -214,11 +236,11 @@
                       v-for="evt in timedEventsForDate(currentDate)"
                       :key="evt.id"
                       class="tg-event"
-                      :style="timedEventStyle(evt, currentDate)"
+                      :style="timedEventStyleWithOverlap(evt, currentDate)"
                       @click.stop="openEditEventModal(evt)"
                       :title="buildEventTooltip(evt)"
                     >
-                      <span v-if="visibility.title" class="tge-title">{{ evt.title }}</span>
+                      <span v-if="visibility.title" :class="['tge-title', { 'text-wrap': calSettings.textWrap }]">{{ evt.title }}</span>
                       <span v-if="visibility.time" class="tge-time">{{ evt.startTime }}–{{ evt.endTime }}</span>
                       <span v-if="visibility.location && evt.location" class="tge-loc">📍{{ evt.location }}</span>
                       <span v-if="visibility.category && evt.category" class="tge-cat">{{ evt.category }}</span>
@@ -395,6 +417,10 @@
           <template v-if="cdStep === 2">
             <p class="modal-hint">Select which calendars to import, rename them, and assign colours.</p>
             <div v-if="cdSelected.length === 0" class="status-msg warn-msg">No calendars found. You can go back and check the URL.</div>
+            <div v-else class="cd-selall-row">
+              <button class="link-btn" @click="cdSelected.forEach(c => c.included = true)">✓ Select All</button>
+              <button class="link-btn" @click="cdSelected.forEach(c => c.included = false)">✗ Deselect All</button>
+            </div>
             <div class="cd-calendar-list">
               <div v-for="(cal, i) in cdSelected" :key="cal.href" class="cd-calendar-row">
                 <label class="cd-cal-check">
@@ -448,14 +474,24 @@
 
           <div class="ie-section">
             <h4>📤 Export</h4>
-            <div class="input-group">
-              <label>Calendar</label>
-              <select v-model="exportCalId" class="select">
-                <option value="all">All Calendars</option>
-                <option v-for="cal in calendars" :key="cal.id" :value="cal.id">{{ cal.name }}</option>
-              </select>
+            <div class="ie-export-header">
+              <label class="checkbox-inline">
+                <input type="checkbox"
+                  :checked="exportSelectedIds.length === calendars.length && calendars.length > 0"
+                  :indeterminate="exportSelectedIds.length > 0 && exportSelectedIds.length < calendars.length"
+                  @change="(e) => { const t = e.target as HTMLInputElement; exportSelectedIds = t.checked ? calendars.map(c => c.id) : []; }"
+                />
+                <strong>All Calendars</strong>
+              </label>
             </div>
-            <button class="btn btn-outline" @click="exportICS">📄 Download ICS</button>
+            <div class="ie-export-cals">
+              <label v-for="cal in calendars" :key="cal.id" class="checkbox-inline ie-cal-opt">
+                <input type="checkbox" :value="cal.id" v-model="exportSelectedIds" />
+                <span class="cal-dot" :style="{ backgroundColor: cal.color }"></span>
+                {{ cal.name }}
+              </label>
+            </div>
+            <button class="btn btn-outline" @click="exportICS" :disabled="exportSelectedIds.length === 0">📄 Download ICS</button>
           </div>
 
           <div class="ie-section">
@@ -516,6 +552,43 @@
             <button class="btn btn-primary" @click="exportPDF" :disabled="isPrinting">
               {{ isPrinting ? '⏳ Generating…' : '📄 Export PDF' }}
             </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings -->
+      <div v-if="showSettingsModal" class="modal-overlay" @click.self="showSettingsModal = false">
+        <div class="modal-content">
+          <h3>⚙️ Settings</h3>
+
+          <div class="input-group">
+            <label>Default view on open</label>
+            <div class="view-switcher">
+              <button class="view-btn" :class="{ active: calSettings.defaultView === 'day' }" @click="calSettings.defaultView = 'day'">Day</button>
+              <button class="view-btn" :class="{ active: calSettings.defaultView === 'week' }" @click="calSettings.defaultView = 'week'">Week</button>
+              <button class="view-btn" :class="{ active: calSettings.defaultView === 'month' }" @click="calSettings.defaultView = 'month'">Month</button>
+            </div>
+          </div>
+
+          <div class="input-group">
+            <label>Default start hour <span class="hint">(day &amp; week view)</span></label>
+            <div class="settings-hour-row">
+              <input type="range" min="0" max="23" step="1" v-model.number="calSettings.startHour" class="zoom-slider" />
+              <span class="zoom-value">{{ formatHour(calSettings.startHour) }}</span>
+            </div>
+          </div>
+
+          <div class="input-group">
+            <label class="checkbox-inline">
+              <input type="checkbox" v-model="calSettings.textWrap" />
+              Wrap long text in event tiles
+            </label>
+          </div>
+
+          <div class="modal-buttons">
+            <span class="btn-spacer"></span>
+            <button class="btn btn-outline" @click="showSettingsModal = false">Close</button>
+            <button class="btn btn-primary" @click="saveSettings">Save</button>
           </div>
         </div>
       </div>
@@ -631,14 +704,30 @@ const printError = ref('');
 const isPrinting = ref(false);
 
 // ─── Import/Export state ──────────────────────────────────────────────────────
-const exportCalId = ref('all');
+const exportSelectedIds = ref<string[]>([]);
 const importCalId = ref('');
 const importMsg = ref('');
 const importMsgType = ref<'success' | 'error'>('success');
 
+function openImportExportModal() {
+  exportSelectedIds.value = calendars.value.map(c => c.id);
+  importMsg.value = '';
+  showImportExportModal.value = true;
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 const weekdayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const HOUR_PX = 60; // pixel height per hour in time grids
+
+// ─── Zoom & Settings state ────────────────────────────────────────────────────
+const zoomLevel = ref(60); // px per hour in time-grid
+
+interface CalSettings {
+  defaultView: 'day' | 'week' | 'month';
+  startHour: number;
+  textWrap: boolean;
+}
+const calSettings = ref<CalSettings>({ defaultView: 'week', startHour: 8, textWrap: false });
+const showSettingsModal = ref(false);
 
 // ─── Computed ─────────────────────────────────────────────────────────────────
 
@@ -757,22 +846,106 @@ function timedEventsForDate(date: Date): CalEvent[] {
   return visibleEventsForDate(date).filter(e => !e.allDay);
 }
 
-function timedEventStyle(evt: CalEvent, day?: Date): Record<string, string> {
+// ─── Overlap layout ───────────────────────────────────────────────────────────
+interface OverlapInfo { col: number; total: number; }
+
+function timeToMin(t: string): number {
+  const [h, m] = (t || '00:00').split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+
+function computeOverlapLayout(evts: CalEvent[], day: Date): Map<string, OverlapInfo> {
+  const result = new Map<string, OverlapInfo>();
+  if (!evts.length) return result;
+  const ds = dateStr(day);
+
+  interface Item { id: string; start: number; end: number; }
+  const items: Item[] = evts.map(evt => {
+    const effStart = evt.startDate < ds ? 0 : timeToMin(evt.startTime);
+    const effEnd = evt.endDate > ds ? 24 * 60 : timeToMin(evt.endTime || '00:00');
+    return { id: evt.id, start: effStart, end: Math.max(effEnd, effStart + 15) };
+  });
+  items.sort((a, b) => a.start - b.start || a.end - b.end);
+
+  const colEnds: number[] = [];
+  const colAssign = new Map<string, number>();
+
+  for (const item of items) {
+    let placed = false;
+    for (let c = 0; c < colEnds.length; c++) {
+      if (colEnds[c] <= item.start) {
+        colEnds[c] = item.end;
+        colAssign.set(item.id, c);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      colAssign.set(item.id, colEnds.length);
+      colEnds.push(item.end);
+    }
+  }
+
+  for (const item of items) {
+    const myCol = colAssign.get(item.id)!;
+    let maxCol = myCol;
+    for (const other of items) {
+      if (other.id === item.id) continue;
+      if (item.start < other.end && item.end > other.start) {
+        maxCol = Math.max(maxCol, colAssign.get(other.id)!);
+      }
+    }
+    result.set(item.id, { col: myCol, total: maxCol + 1 });
+  }
+  return result;
+}
+
+const _overlapCache = new Map<string, Map<string, OverlapInfo>>();
+
+function overlapLayoutForDay(day: Date): Map<string, OverlapInfo> {
+  const key = dateStr(day);
+  if (!_overlapCache.has(key)) {
+    _overlapCache.set(key, computeOverlapLayout(timedEventsForDate(day), day));
+  }
+  return _overlapCache.get(key)!;
+}
+
+watch(events, () => _overlapCache.clear(), { deep: true });
+watch(calendars, () => _overlapCache.clear(), { deep: true });
+watch(currentDate, () => _overlapCache.clear());
+watch(currentView, () => _overlapCache.clear());
+
+// ─── Timed event style ────────────────────────────────────────────────────────
+
+function timedEventStyle(evt: CalEvent, day?: Date, overlap?: OverlapInfo): Record<string, string> {
   const ds = day ? dateStr(day) : evt.startDate;
   const effStartTime = evt.startDate < ds ? '00:00' : evt.startTime;
   const effEndTime = evt.endDate > ds ? '24:00' : evt.endTime;
   const [sh, sm] = effStartTime.split(':').map(Number);
   const [eh, em] = effEndTime.split(':').map(Number);
-  const top = (sh * 60 + sm) * (HOUR_PX / 60);
+  const top = (sh * 60 + sm) * (zoomLevel.value / 60);
   const dur = Math.max((eh * 60 + em) - (sh * 60 + sm), 15);
+
+  const col = overlap?.col ?? 0;
+  const total = overlap?.total ?? 1;
+  const widthPct = 100 / total;
+  const leftPct = col * widthPct;
+
   return {
     position: 'absolute',
     top: `${top}px`,
-    height: `${dur * (HOUR_PX / 60)}px`,
-    left: '3px', right: '3px',
+    height: `${dur * (zoomLevel.value / 60)}px`,
+    left: total > 1 ? `calc(${leftPct}% + 2px)` : '3px',
+    width: total > 1 ? `calc(${widthPct}% - 4px)` : 'calc(100% - 6px)',
+    right: 'unset',
     backgroundColor: calendarColor(evt.calendarId),
-    zIndex: '1',
+    zIndex: String(col + 1),
   };
+}
+
+function timedEventStyleWithOverlap(evt: CalEvent, day: Date): Record<string, string> {
+  const layout = overlapLayoutForDay(day);
+  return timedEventStyle(evt, day, layout.get(evt.id));
 }
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
@@ -867,8 +1040,8 @@ function deleteCurrentEvent() {
 function handleTimeGridClick(e: MouseEvent, day: Date) {
   const target = e.currentTarget as HTMLElement;
   const y = e.clientY - target.getBoundingClientRect().top;
-  const hour = Math.floor(y / HOUR_PX);
-  const min  = Math.round((y % HOUR_PX) / HOUR_PX * 60 / 15) * 15;
+  const hour = Math.floor(y / zoomLevel.value);
+  const min  = Math.round((y % zoomLevel.value) / zoomLevel.value * 60 / 15) * 15;
   const startTime = `${String(hour).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
   const endHour = Math.min(hour + 1, 23);
   const endTime   = `${String(endHour).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
@@ -930,6 +1103,11 @@ function confirmDeleteCalendar(calId: string) {
 function updateCalendarColor(calId: string, color: string) {
   const cal = calendars.value.find(c => c.id === calId);
   if (cal) { cal.color = color; saveToStorage(); }
+}
+
+function setAllCalendarsVisible(visible: boolean) {
+  calendars.value.forEach(c => { c.visible = visible; });
+  saveToStorage();
 }
 
 // ─── CalDAV ───────────────────────────────────────────────────────────────────
@@ -1187,9 +1365,10 @@ function generateICS(evts: CalEvent[]): string {
 }
 
 function exportICS() {
-  const toExport = exportCalId.value === 'all'
+  const selected = exportSelectedIds.value;
+  const toExport = selected.length === 0
     ? events.value
-    : events.value.filter(e => e.calendarId === exportCalId.value);
+    : events.value.filter(e => selected.includes(e.calendarId));
   if (!toExport.length) { alert('No events to export.'); return; }
   const blob = new Blob([generateICS(toExport)], { type: 'text/calendar;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -1652,6 +1831,8 @@ function saveToStorage() {
   localStorage.setItem('cal_calendars', JSON.stringify(calendars.value));
   localStorage.setItem('cal_events',    JSON.stringify(events.value));
   localStorage.setItem('cal_visibility', JSON.stringify(visibility.value));
+  localStorage.setItem('cal_zoom', String(zoomLevel.value));
+  localStorage.setItem('cal_settings', JSON.stringify(calSettings.value));
 }
 
 function loadFromStorage() {
@@ -1660,10 +1841,19 @@ function loadFromStorage() {
     const c = localStorage.getItem('cal_calendars');
     const e = localStorage.getItem('cal_events');
     const v = localStorage.getItem('cal_visibility');
+    const z = localStorage.getItem('cal_zoom');
+    const s = localStorage.getItem('cal_settings');
     if (c) calendars.value = JSON.parse(c);
     if (e) events.value    = JSON.parse(e);
     if (v) visibility.value = { ...visibility.value, ...JSON.parse(v) };
+    if (z) zoomLevel.value = Number(z) || 60;
+    if (s) calSettings.value = { ...calSettings.value, ...JSON.parse(s) };
   } catch { /* ignore corrupt data */ }
+}
+
+function saveSettings() {
+  saveToStorage();
+  showSettingsModal.value = false;
 }
 
 function recordLastAccessed() {
@@ -1686,6 +1876,37 @@ onMounted(() => {
     saveToStorage();
   }
   importCalId.value = calendars.value[0]?.id ?? '';
+  // Apply settings
+  currentView.value = calSettings.value.defaultView;
+  nextTick(() => scrollToStartHour());
+  // Keyboard shortcuts
+  document.addEventListener('keydown', handleKeydown);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeydown);
+});
+
+function handleKeydown(e: KeyboardEvent) {
+  if (e.ctrlKey && e.shiftKey && e.key === 'Enter') {
+    e.preventDefault();
+    openAddEventModal();
+  } else if (e.ctrlKey && e.key === 'p') {
+    e.preventDefault();
+    openPrintModal();
+  }
+}
+
+const timeGridScrollRef = ref<HTMLElement | null>(null);
+
+function scrollToStartHour() {
+  if (currentView.value !== 'day' && currentView.value !== 'week') return;
+  const el = document.querySelector('.time-grid-scroll') as HTMLElement | null;
+  if (el) el.scrollTop = calSettings.value.startHour * zoomLevel.value;
+}
+
+watch(currentView, (v) => {
+  if (v === 'day' || v === 'week') nextTick(() => scrollToStartHour());
 });
 </script>
 
@@ -1990,7 +2211,7 @@ onMounted(() => {
   border-right: 1px solid var(--color-border);
 }
 .tg-hour-label {
-  height: 60px;
+  height: var(--hour-px, 60px);
   display: flex;
   align-items: flex-start;
   justify-content: flex-end;
@@ -2008,7 +2229,7 @@ onMounted(() => {
   position: relative;
   border-right: 1px solid var(--color-border);
 }
-.tg-hour-row { height: 60px; border-top: 1px solid var(--color-border); }
+.tg-hour-row { height: var(--hour-px, 60px); border-top: 1px solid var(--color-border); }
 
 .tg-event {
   position: absolute;
@@ -2143,4 +2364,42 @@ onMounted(() => {
   .form-grid { grid-template-columns: 1fr; }
   .form-grid .full { grid-column: 1; }
 }
+
+/* ── Zoom slider ─────────────────────────────────────────────────────────────*/
+.zoom-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0; }
+.zoom-row label { font-size: 0.78rem; color: var(--color-text-muted); white-space: nowrap; }
+.zoom-slider { flex: 1; accent-color: var(--color-primary); cursor: pointer; }
+.zoom-value { font-size: 0.75rem; color: var(--color-text-muted); white-space: nowrap; min-width: 3ch; text-align: right; }
+
+/* ── Sidebar header actions (show all / hide all) ────────────────────────────*/
+.sidebar-hdr-actions { display: flex; gap: 0.35rem; }
+.link-btn {
+  background: none; border: none; cursor: pointer;
+  font-size: 0.72rem; color: var(--color-primary);
+  padding: 0.15rem 0.3rem; border-radius: var(--radius);
+  white-space: nowrap;
+}
+.link-btn:hover { background: var(--color-primary-hover, rgba(0,0,0,0.06)); }
+
+/* ── CalDAV select-all row ───────────────────────────────────────────────────*/
+.cd-selall-row { display: flex; gap: 0.5rem; margin-bottom: 0.25rem; }
+
+/* ── Export calendar checkboxes ──────────────────────────────────────────────*/
+.ie-export-header { margin-bottom: 0.3rem; }
+.ie-export-cals { display: flex; flex-direction: column; gap: 0.25rem; max-height: 180px; overflow-y: auto; margin-bottom: 0.75rem; border: 1px solid var(--color-border); border-radius: var(--radius); padding: 0.4rem 0.6rem; }
+.ie-cal-opt { display: flex; align-items: center; gap: 0.4rem; font-size: 0.875rem; cursor: pointer; }
+.checkbox-inline { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem; }
+.cal-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+/* ── Text wrap in event tiles ────────────────────────────────────────────────*/
+.tge-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tge-title.text-wrap { white-space: normal; overflow: visible; text-overflow: unset; word-break: break-word; }
+.chip-title.text-wrap { white-space: normal; overflow: visible; text-overflow: unset; word-break: break-word; }
+
+/* ── Settings modal ──────────────────────────────────────────────────────────*/
+.settings-hour-row { display: flex; align-items: center; gap: 0.5rem; }
+.settings-hour-row .zoom-slider { flex: 1; }
+.hint { font-size: 0.75rem; color: var(--color-text-muted); font-weight: 400; }
+
+
 </style>
