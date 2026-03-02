@@ -1,7 +1,7 @@
 <template>
   <div>
     <NuxtLayout name="authenticated">
-      <div class="calendar-page">
+      <div class="calendar-page" :style="{ '--event-font-size': calSettings.fontSize + 'px' }">
 
         <!-- ── Sidebar ─────────────────────────────────────────────────── -->
         <aside class="cal-sidebar">
@@ -41,9 +41,10 @@
               <button class="btn btn-outline btn-sm w-full" @click="openAddCalendarModal">＋ New Calendar</button>
               <button class="btn btn-outline btn-sm w-full" @click="openCalDAVModal">🌐 Subscribe (CalDAV)</button>
             </div>
+            <button v-if="recycledCalendars.length > 0" class="link-btn recycle-btn" @click="showRecycleBinModal = true">
+              🗑️ Recycle Bin ({{ recycledCalendars.length }})
+            </button>
           </div>
-
-          <!-- Visibility Toggles -->
           <div class="sidebar-section">
             <h3>👁️ Show in Events</h3>
             <div class="vis-list">
@@ -90,6 +91,7 @@
               <button class="btn btn-outline btn-sm" @click="goToToday">Today</button>
               <button class="btn btn-outline btn-sm" @click="navigate(1)">›</button>
               <h2 class="period-label">{{ currentPeriodLabel }}</h2>
+              <button class="btn btn-outline btn-sm date-picker-btn" @click="showDatePicker = !showDatePicker; datePickerMonth = new Date(currentDate)" title="Jump to date">📅</button>
             </div>
             <div class="cal-header-actions">
               <div class="view-switcher">
@@ -190,7 +192,7 @@
                       :title="buildEventTooltip(evt)"
                     >
                       <span v-if="visibility.title" :class="['tge-title', { 'text-wrap': calSettings.textWrap }]">{{ evt.title }}</span>
-                      <span v-if="visibility.time" class="tge-time">{{ evt.startTime }}–{{ evt.endTime }}</span>
+                      <span v-if="visibility.time" class="tge-time">{{ formatEventTime(evt.startTime) }}–{{ formatEventTime(evt.endTime) }}</span>
                       <span v-if="visibility.location && evt.location" class="tge-loc">📍{{ evt.location }}</span>
                       <span v-if="visibility.category && evt.category" class="tge-cat">{{ evt.category }}</span>
                     </div>
@@ -241,7 +243,7 @@
                       :title="buildEventTooltip(evt)"
                     >
                       <span v-if="visibility.title" :class="['tge-title', { 'text-wrap': calSettings.textWrap }]">{{ evt.title }}</span>
-                      <span v-if="visibility.time" class="tge-time">{{ evt.startTime }}–{{ evt.endTime }}</span>
+                      <span v-if="visibility.time" class="tge-time">{{ formatEventTime(evt.startTime) }}–{{ formatEventTime(evt.endTime) }}</span>
                       <span v-if="visibility.location && evt.location" class="tge-loc">📍{{ evt.location }}</span>
                       <span v-if="visibility.category && evt.category" class="tge-cat">{{ evt.category }}</span>
                     </div>
@@ -597,10 +599,83 @@
             </label>
           </div>
 
+          <div class="input-group">
+            <label>Event font size</label>
+            <div class="settings-hour-row">
+              <input type="range" min="10" max="16" step="1" v-model.number="calSettings.fontSize" class="zoom-slider" />
+              <span class="zoom-value">{{ calSettings.fontSize }}px</span>
+            </div>
+          </div>
+          <div class="input-group">
+            <label>Time display style</label>
+            <div class="view-switcher">
+              <button class="view-btn" :class="{ active: calSettings.timeStyle === 'classic' }" @click="calSettings.timeStyle = 'classic'">12h</button>
+              <button class="view-btn" :class="{ active: calSettings.timeStyle === 'iso' }" @click="calSettings.timeStyle = 'iso'">24h</button>
+              <button class="view-btn" :class="{ active: calSettings.timeStyle === 'military' }" @click="calSettings.timeStyle = 'military'">Military</button>
+            </div>
+          </div>
+          <div class="input-group">
+            <label>Recycle bin auto-delete <span class="hint">(0 = never)</span></label>
+            <div class="settings-hour-row">
+              <input type="range" min="0" max="365" step="1" v-model.number="calSettings.recycleBinDays" class="zoom-slider" />
+              <span class="zoom-value">{{ calSettings.recycleBinDays === 0 ? '∞' : calSettings.recycleBinDays + 'd' }}</span>
+            </div>
+          </div>
+
           <div class="modal-buttons">
             <span class="btn-spacer"></span>
             <button class="btn btn-outline" @click="showSettingsModal = false">Close</button>
             <button class="btn btn-primary" @click="saveSettings">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recycle Bin -->
+      <div v-if="showRecycleBinModal" class="modal-overlay" @click.self="showRecycleBinModal = false">
+        <div class="modal-content">
+          <h3>🗑️ Recycle Bin</h3>
+          <p class="modal-hint">Calendars here are automatically deleted after {{ calSettings.recycleBinDays === 0 ? 'never (disabled)' : calSettings.recycleBinDays + ' days' }}.</p>
+          <div v-if="recycledCalendars.length === 0" class="status-msg">Recycle bin is empty.</div>
+          <div v-else class="recycle-list">
+            <div v-for="entry in recycledCalendars" :key="entry.calendar.id" class="recycle-row">
+              <span class="cal-dot" :style="{ backgroundColor: entry.calendar.color }"></span>
+              <span class="recycle-name">{{ entry.calendar.name }}</span>
+              <span class="recycle-meta">{{ entry.events.length }} event{{ entry.events.length !== 1 ? 's' : '' }}</span>
+              <span class="recycle-age">{{ recycleDaysAgo(entry.deletedAt) }}</span>
+              <button class="btn btn-outline btn-sm" @click="restoreCalendar(entry)">↩ Restore</button>
+              <button class="btn btn-outline btn-sm danger-btn" @click="permanentlyDeleteCalendar(entry)">✕ Delete</button>
+            </div>
+          </div>
+          <div class="modal-buttons">
+            <span class="btn-spacer"></span>
+            <button class="btn btn-outline" @click="showRecycleBinModal = false">Close</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Date Picker Popup -->
+      <div v-if="showDatePicker" class="date-picker-overlay" @click.self="showDatePicker = false">
+        <div class="date-picker-popup">
+          <div class="dp-header">
+            <button class="icon-btn" @click="datePickerMonth = new Date(datePickerMonth.getFullYear(), datePickerMonth.getMonth() - 1, 1)">‹</button>
+            <span class="dp-title">{{ datePickerMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) }}</span>
+            <button class="icon-btn" @click="datePickerMonth = new Date(datePickerMonth.getFullYear(), datePickerMonth.getMonth() + 1, 1)">›</button>
+          </div>
+          <div class="dp-weekdays">
+            <span v-for="d in weekdayNames" :key="d">{{ d.slice(0,1) }}</span>
+          </div>
+          <div class="dp-grid">
+            <div
+              v-for="(cell, i) in datePickerCells"
+              :key="i"
+              :class="['dp-cell', { 'dp-today': cell.isToday, 'dp-selected': cell.isCurrent, 'dp-other': cell.date.getMonth() !== datePickerMonth.getMonth() }]"
+              @click="selectDatePickerDate(cell.date)"
+            >
+              <span class="dp-num">{{ cell.date.getDate() }}</span>
+              <div class="dp-dots">
+                <span v-for="(color, ci) in eventDotsForDate(cell.date)" :key="ci" class="dp-dot" :style="{ backgroundColor: color }"></span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -670,6 +745,12 @@ interface ParsedICSEvent {
   sourceTzid?: string;  // original TZID from ICS
 }
 
+interface RecycleBinEntry {
+  calendar: Calendar;
+  events: CalEvent[];
+  deletedAt: string; // ISO datetime string
+}
+
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 const auth = useAuthStore();
 onMounted(() => auth.initFromStorage());
@@ -689,6 +770,11 @@ const showEventModal = ref(false);
 const showCalendarModal = ref(false);
 const showCalDAVModal = ref(false);
 const showImportExportModal = ref(false);
+
+const recycledCalendars = ref<RecycleBinEntry[]>([]);
+const showRecycleBinModal = ref(false);
+const showDatePicker = ref(false);
+const datePickerMonth = ref(new Date());
 
 const editingEvent = ref<CalEvent | null>(null);
 const editingCalendar = ref<Calendar | null>(null);
@@ -745,12 +831,18 @@ interface CalSettings {
   startHour: number;
   textWrap: boolean;
   myTimezone: string;
+  fontSize: number;            // 10–16, default 12
+  timeStyle: 'classic' | 'iso' | 'military';  // default 'classic'
+  recycleBinDays: number;      // 0 = never auto-delete, default 30
 }
 const calSettings = ref<CalSettings>({
   defaultView: 'week',
   startHour: 8,
   textWrap: false,
   myTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  fontSize: 12,
+  timeStyle: 'classic',
+  recycleBinDays: 30,
 });
 const showSettingsModal = ref(false);
 
@@ -804,6 +896,28 @@ const weekDays = computed(() => {
   return Array.from({ length: 7 }, (_, i) => { const d = new Date(s); d.setDate(d.getDate() + i); return d; });
 });
 
+const datePickerCells = computed(() => {
+  const y = datePickerMonth.value.getFullYear();
+  const m = datePickerMonth.value.getMonth();
+  const first = new Date(y, m, 1);
+  const last  = new Date(y, m + 1, 0);
+  const todayStr = dateStr(new Date());
+  let startDow = first.getDay() - 1;
+  if (startDow < 0) startDow = 6;
+  const cells: { date: Date; isToday: boolean; isCurrent: boolean }[] = [];
+  for (let i = startDow - 1; i >= 0; i--) cells.push({ date: new Date(y, m, -i), isToday: false, isCurrent: false });
+  for (let d = 1; d <= last.getDate(); d++) {
+    const date = new Date(y, m, d);
+    cells.push({ date, isToday: dateStr(date) === todayStr, isCurrent: dateStr(date) === dateStr(currentDate.value) });
+  }
+  while (cells.length < 42) {
+    const prev = cells[cells.length - 1].date;
+    const date = new Date(prev); date.setDate(date.getDate() + 1);
+    cells.push({ date, isToday: false, isCurrent: false });
+  }
+  return cells;
+});
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function dateStr(d: Date): string {
@@ -830,6 +944,19 @@ function formatHour(h: number): string {
   return h < 12 ? `${h} AM` : `${h - 12} PM`;
 }
 
+function formatEventTime(t: string): string {
+  if (!t) return '';
+  const [hStr, mStr] = t.split(':');
+  const h = parseInt(hStr), m = parseInt(mStr);
+  const style = calSettings.value.timeStyle;
+  if (style === 'iso') return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  if (style === 'military') return `${String(h).padStart(2,'0')}${String(m).padStart(2,'0')}`;
+  // classic 12h
+  const period = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return m === 0 ? `${h12} ${period}` : `${h12}:${String(m).padStart(2,'0')} ${period}`;
+}
+
 function formatDayName(d: Date): string {
   return d.toLocaleDateString('en-US', { weekday: 'short' });
 }
@@ -838,7 +965,7 @@ function buildEventTooltip(evt: CalEvent): string {
   const parts = [evt.title];
   if (evt.location) parts.push('📍' + evt.location);
   if (evt.category) parts.push(evt.category);
-  if (!evt.allDay) parts.push(`${evt.startTime}–${evt.endTime}`);
+  if (!evt.allDay) parts.push(`${formatEventTime(evt.startTime)}–${formatEventTime(evt.endTime)}`);
   return parts.join(' · ');
 }
 
@@ -869,6 +996,26 @@ function allDayEventsForDate(date: Date): CalEvent[] {
 
 function timedEventsForDate(date: Date): CalEvent[] {
   return visibleEventsForDate(date).filter(e => !e.allDay);
+}
+
+function eventDotsForDate(d: Date): string[] {
+  const ds = dateStr(d);
+  const seen = new Set<string>();
+  const colors: string[] = [];
+  for (const e of events.value) {
+    const cal = calendars.value.find(c => c.id === e.calendarId);
+    if (!cal?.visible) continue;
+    if (e.startDate <= ds && e.endDate >= ds) {
+      if (!seen.has(cal.color)) { seen.add(cal.color); colors.push(cal.color); }
+    }
+  }
+  return colors.slice(0, 4);
+}
+
+function selectDatePickerDate(d: Date) {
+  currentDate.value = new Date(d);
+  showDatePicker.value = false;
+  datePickerMonth.value = new Date(d);
 }
 
 // ─── Overlap layout ───────────────────────────────────────────────────────────
@@ -1120,10 +1267,32 @@ function saveCalendar() {
 }
 
 function confirmDeleteCalendar(calId: string) {
-  if (!confirm('Delete this calendar and all its events?')) return;
+  if (!confirm('Move this calendar to the recycle bin?')) return;
+  const cal = calendars.value.find(c => c.id === calId);
+  if (!cal) return;
+  const calEvents = events.value.filter(e => e.calendarId === calId);
+  recycledCalendars.value.push({ calendar: cal, events: calEvents, deletedAt: new Date().toISOString() });
   calendars.value = calendars.value.filter(c => c.id !== calId);
   events.value = events.value.filter(e => e.calendarId !== calId);
   saveToStorage();
+}
+
+function restoreCalendar(entry: RecycleBinEntry) {
+  calendars.value.push(entry.calendar);
+  events.value.push(...entry.events);
+  recycledCalendars.value = recycledCalendars.value.filter(e => e.calendar.id !== entry.calendar.id);
+  saveToStorage();
+}
+
+function permanentlyDeleteCalendar(entry: RecycleBinEntry) {
+  if (!confirm(`Permanently delete "${entry.calendar.name}" and all its events? This cannot be undone.`)) return;
+  recycledCalendars.value = recycledCalendars.value.filter(e => e.calendar.id !== entry.calendar.id);
+  saveToStorage();
+}
+
+function recycleDaysAgo(iso: string): string {
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  return days === 0 ? 'Today' : `${days}d ago`;
 }
 
 function updateCalendarColor(calId: string, color: string) {
@@ -1232,6 +1401,12 @@ async function subscribeAllCalDAV() {
 
 // Keep legacy single-URL subscribe for backward compatibility (used internally by syncCalDAV-related paths)
 async function subscribeCalDAV() { /* replaced by wizard – subscribeAllCalDAV */ }
+
+async function syncAllCalDAV() {
+  const subs = calendars.value.filter(c => c.isSubscription && c.subscriptionUrl);
+  if (subs.length === 0) return;
+  await Promise.allSettled(subs.map(cal => syncCalDAV(cal)));
+}
 
 async function syncCalDAV(cal: Calendar) {
   if (!cal.subscriptionUrl) return;
@@ -1972,6 +2147,7 @@ function saveToStorage() {
   localStorage.setItem('cal_visibility', JSON.stringify(visibility.value));
   localStorage.setItem('cal_zoom', String(zoomLevel.value));
   localStorage.setItem('cal_settings', JSON.stringify(calSettings.value));
+  localStorage.setItem('cal_recycle', JSON.stringify(recycledCalendars.value));
 }
 
 function loadFromStorage() {
@@ -1987,6 +2163,15 @@ function loadFromStorage() {
     if (v) visibility.value = { ...visibility.value, ...JSON.parse(v) };
     if (z) zoomLevel.value = Number(z) || 60;
     if (s) calSettings.value = { ...calSettings.value, ...JSON.parse(s) };
+    const r = localStorage.getItem('cal_recycle');
+    if (r) recycledCalendars.value = JSON.parse(r);
+    // Auto-cleanup expired entries
+    if (calSettings.value.recycleBinDays > 0) {
+      const threshold = Date.now() - calSettings.value.recycleBinDays * 86400000;
+      recycledCalendars.value = recycledCalendars.value.filter(
+        e => new Date(e.deletedAt).getTime() > threshold
+      );
+    }
   } catch { /* ignore corrupt data */ }
 }
 
@@ -2008,6 +2193,7 @@ function recordLastAccessed() {
 
 onMounted(() => {
   loadFromStorage();
+  syncAllCalDAV();
   recordLastAccessed();
   // Create a default calendar if none exist
   if (calendars.value.length === 0) {
@@ -2026,8 +2212,32 @@ onUnmounted(() => {
   document.removeEventListener('keydown', handleKeydown);
 });
 
+function closeTopmostModal() {
+  if (showEventModal.value) { showEventModal.value = false; return; }
+  if (showCalendarModal.value) { showCalendarModal.value = false; return; }
+  if (showCalDAVModal.value) { showCalDAVModal.value = false; return; }
+  if (showImportExportModal.value) { showImportExportModal.value = false; return; }
+  if (showPrintModal.value) { showPrintModal.value = false; return; }
+  if (showSettingsModal.value) { showSettingsModal.value = false; return; }
+  if (showRecycleBinModal.value) { showRecycleBinModal.value = false; return; }
+  if (showDatePicker.value) { showDatePicker.value = false; return; }
+}
+
 function handleKeydown(e: KeyboardEvent) {
-  if (e.ctrlKey && e.shiftKey && e.key === 'Enter') {
+  if (e.key === 'Escape') {
+    closeTopmostModal();
+  } else if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const tag = (e.target as HTMLElement).tagName.toLowerCase();
+    if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') {
+      if (showEventModal.value) { saveEvent(); }
+      else if (showCalendarModal.value) { saveCalendar(); }
+      else if (showSettingsModal.value) { saveSettings(); }
+    }
+  } else if (e.ctrlKey && e.key === 's') {
+    e.preventDefault();
+    saveToStorage();
+    syncAllCalDAV();
+  } else if (e.ctrlKey && e.shiftKey && e.key === 'Enter') {
     e.preventDefault();
     openAddEventModal();
   } else if (e.ctrlKey && e.key === 'p') {
@@ -2543,5 +2753,50 @@ watch(currentView, (v) => {
 /* ── CalDAV wizard calendar timezone field ───────────────────────────────────*/
 .cd-cal-tz { width: 140px; flex-shrink: 0; font-size: 0.75rem; }
 
+/* ── Font size variable ───────────────────────────────────────────────────────*/
+.tge-title, .tge-time, .tge-loc, .tge-cat, .chip-title, .chip-time {
+  font-size: var(--event-font-size, 12px);
+}
+
+/* ── Recycle bin ─────────────────────────────────────────────────────────────*/
+.recycle-btn { color: var(--color-danger, #ef4444) !important; margin-top: 0.25rem; }
+.recycle-list { display: flex; flex-direction: column; gap: 0.5rem; max-height: 300px; overflow-y: auto; }
+.recycle-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0; border-bottom: 1px solid var(--color-border); }
+.recycle-name { flex: 1; font-weight: 500; }
+.recycle-meta { font-size: 0.75rem; color: var(--color-text-muted); }
+.recycle-age { font-size: 0.75rem; color: var(--color-text-muted); white-space: nowrap; }
+
+/* ── Date picker popup ───────────────────────────────────────────────────────*/
+.date-picker-overlay { position: fixed; inset: 0; z-index: 900; }
+.date-picker-popup {
+  position: absolute;
+  top: 70px; left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+  padding: 0.75rem;
+  width: 260px;
+  z-index: 901;
+}
+.dp-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.4rem; }
+.dp-title { font-weight: 600; font-size: 0.875rem; }
+.dp-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-size: 0.7rem; color: var(--color-text-muted); margin-bottom: 0.2rem; }
+.dp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; }
+.dp-cell {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 2px 0; cursor: pointer; border-radius: 4px;
+  min-height: 32px;
+}
+.dp-cell:hover { background: var(--color-primary-hover, rgba(0,0,0,0.07)); }
+.dp-today .dp-num { color: var(--color-primary); font-weight: 700; }
+.dp-selected { background: var(--color-primary) !important; }
+.dp-selected .dp-num { color: white; }
+.dp-other .dp-num { color: var(--color-text-muted); opacity: 0.5; }
+.dp-num { font-size: 0.75rem; line-height: 1.4; }
+.dp-dots { display: flex; gap: 2px; flex-wrap: wrap; justify-content: center; min-height: 6px; }
+.dp-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+.date-picker-btn { font-size: 0.85rem; }
 
 </style>
