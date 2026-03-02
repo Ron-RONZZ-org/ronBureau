@@ -262,38 +262,55 @@
 
       <!-- Add / Edit Event -->
       <div v-if="showEventModal" class="modal-overlay" @click.self="showEventModal = false">
-        <div class="modal-content modal-lg">
+        <div class="modal-content modal-wide">
           <h3>{{ editingEvent ? '✏️ Edit Event' : '＋ New Event' }}</h3>
           <div v-if="editingEvent?.readOnly" class="status-msg warn-msg">🔒 This event is from a read-only calendar and cannot be edited.</div>
 
-          <div class="form-grid">
+          <!-- Tabs -->
+          <div class="evt-tabs">
+            <button :class="['evt-tab', { active: evtTab === 'details' }]" @click="evtTab = 'details'">📋 Details</button>
+            <button :class="['evt-tab', { active: evtTab === 'recurrence' }]" @click="evtTab = 'recurrence'">🔁 Recurrence</button>
+            <button :class="['evt-tab', { active: evtTab === 'participation' }]" @click="evtTab = 'participation'">👥 Participation</button>
+            <button :class="['evt-tab', { active: evtTab === 'alarms' }]" @click="evtTab = 'alarms'">🔔 Alarms</button>
+          </div>
+
+          <!-- Tab: Details -->
+          <div v-show="evtTab === 'details'" class="form-grid">
             <div class="input-group full">
               <label>Title <span class="req">*</span></label>
               <input v-model="evtForm.title" type="text" class="input" placeholder="Event title" :disabled="editingEvent?.readOnly" />
             </div>
-
             <div class="input-group">
               <label>Calendar</label>
               <select v-model="evtForm.calendarId" class="select" :disabled="editingEvent?.readOnly">
-                <option
-                  v-for="cal in editableCalendars"
-                  :key="cal.id"
-                  :value="cal.id"
-                >{{ cal.name }}</option>
+                <option v-for="cal in editableCalendars" :key="cal.id" :value="cal.id">{{ cal.name }}</option>
               </select>
             </div>
-
             <div class="input-group">
-              <label>Category</label>
-              <input v-model="evtForm.category" type="text" class="input" placeholder="e.g. Work, Personal" :disabled="editingEvent?.readOnly" />
+              <label>Status</label>
+              <select v-model="evtForm.status" class="select" :disabled="editingEvent?.readOnly">
+                <option value="CONFIRMED">Confirmed</option>
+                <option value="TENTATIVE">Tentative</option>
+                <option value="CANCELLED">Cancelled</option>
+              </select>
             </div>
-
+            <div class="input-group">
+              <label>Class</label>
+              <select v-model="evtForm.klass" class="select" :disabled="editingEvent?.readOnly">
+                <option value="PUBLIC">Public</option>
+                <option value="PRIVATE">Private</option>
+                <option value="CONFIDENTIAL">Confidential</option>
+              </select>
+            </div>
+            <div class="input-group">
+              <label>Priority <span class="hint">(0=none, 1=high, 9=low)</span></label>
+              <input v-model.number="evtForm.priority" type="number" min="0" max="9" class="input" :disabled="editingEvent?.readOnly" />
+            </div>
             <div class="input-group full">
               <label class="checkbox-inline">
                 <input type="checkbox" v-model="evtForm.allDay" :disabled="editingEvent?.readOnly" /> All Day Event
               </label>
             </div>
-
             <div class="input-group">
               <label>Start Date</label>
               <input v-model="evtForm.startDate" type="date" class="input" :disabled="editingEvent?.readOnly" />
@@ -302,7 +319,6 @@
               <label>Start Time</label>
               <input v-model="evtForm.startTime" type="time" class="input" :disabled="editingEvent?.readOnly" />
             </div>
-
             <div class="input-group">
               <label>End Date</label>
               <input v-model="evtForm.endDate" type="date" class="input" :disabled="editingEvent?.readOnly" />
@@ -311,24 +327,98 @@
               <label>End Time</label>
               <input v-model="evtForm.endTime" type="time" class="input" :disabled="editingEvent?.readOnly" />
             </div>
-
             <div class="input-group full">
               <label>Location</label>
               <input v-model="evtForm.location" type="text" class="input" placeholder="Location..." :disabled="editingEvent?.readOnly" />
             </div>
-
+            <div class="input-group full">
+              <label>Category</label>
+              <input v-model="evtForm.category" type="text" class="input" placeholder="e.g. Work, Personal" :disabled="editingEvent?.readOnly" />
+            </div>
             <div class="input-group full">
               <label>Description</label>
               <textarea v-model="evtForm.description" class="input textarea" rows="3" placeholder="Description..." :disabled="editingEvent?.readOnly"></textarea>
             </div>
-
             <div class="input-group full">
               <label>Tags <span class="hint">(comma-separated)</span></label>
               <input v-model="evtForm.tagsInput" type="text" class="input" placeholder="tag1, tag2, ..." :disabled="editingEvent?.readOnly" />
             </div>
+            <div class="input-group full">
+              <label>URL</label>
+              <input v-model="evtForm.url" type="url" class="input" placeholder="https://..." :disabled="editingEvent?.readOnly" />
+            </div>
+            <div class="input-group full">
+              <label>Attachments <span class="hint">(one URI per line)</span></label>
+              <textarea v-model="evtForm.attachInput" class="input textarea" rows="2" placeholder="https://file1.pdf&#10;https://file2.pdf" :disabled="editingEvent?.readOnly"></textarea>
+            </div>
+            <div class="input-group full">
+              <label>Related To <span class="hint">(UID of related event)</span></label>
+              <input v-model="evtForm.relatedTo" type="text" class="input" placeholder="event-uid..." :disabled="editingEvent?.readOnly" />
+            </div>
+          </div>
+
+          <!-- Tab: Recurrence -->
+          <div v-show="evtTab === 'recurrence'" class="form-grid">
+            <div class="input-group full">
+              <label>RRULE <span class="hint">(RFC 5545, e.g. FREQ=WEEKLY;BYDAY=MO,WE,FR)</span></label>
+              <input v-model="evtForm.rrule" type="text" class="input" placeholder="FREQ=WEEKLY;BYDAY=MO" :disabled="editingEvent?.readOnly" />
+            </div>
+            <div class="input-group full">
+              <label>RDATE <span class="hint">(one value per line, e.g. 20240301T100000Z)</span></label>
+              <textarea v-model="evtForm.rdateInput" class="input textarea" rows="3" placeholder="20240301T100000Z" :disabled="editingEvent?.readOnly"></textarea>
+            </div>
+            <div class="input-group full">
+              <label>EXDATE <span class="hint">(exception dates, one per line)</span></label>
+              <textarea v-model="evtForm.exdateInput" class="input textarea" rows="3" placeholder="20240308T100000Z" :disabled="editingEvent?.readOnly"></textarea>
+            </div>
+          </div>
+
+          <!-- Tab: Participation -->
+          <div v-show="evtTab === 'participation'" class="form-grid">
+            <div class="input-group full">
+              <label>Transparency</label>
+              <select v-model="evtForm.transp" class="select" :disabled="editingEvent?.readOnly">
+                <option value="OPAQUE">Opaque (shows as busy)</option>
+                <option value="TRANSPARENT">Transparent (free)</option>
+              </select>
+            </div>
+            <div class="input-group full">
+              <label>Organizer <span class="hint">(e.g. CN=Name:mailto:email@example.com)</span></label>
+              <input v-model="evtForm.organizer" type="text" class="input" placeholder="CN=John:mailto:john@example.com" :disabled="editingEvent?.readOnly" />
+            </div>
+            <div class="input-group full">
+              <label>Contact</label>
+              <input v-model="evtForm.contact" type="text" class="input" placeholder="Contact name or email" :disabled="editingEvent?.readOnly" />
+            </div>
+            <div class="input-group full">
+              <label>Attendees <span class="hint">(one per line, e.g. CN=Name:mailto:email@example.com)</span></label>
+              <textarea v-model="evtForm.attendeesInput" class="input textarea" rows="5" placeholder="CN=Alice:mailto:alice@example.com&#10;CN=Bob:mailto:bob@example.com" :disabled="editingEvent?.readOnly"></textarea>
+            </div>
+          </div>
+
+          <!-- Tab: Alarms (VALARM) -->
+          <div v-show="evtTab === 'alarms'" class="form-grid">
+            <div class="input-group full">
+              <label>Trigger <span class="hint">(e.g. -PT15M = 15 min before, PT0S = at start)</span></label>
+              <input v-model="evtForm.alarmTrigger" type="text" class="input" placeholder="-PT15M" :disabled="editingEvent?.readOnly" />
+            </div>
+            <div class="input-group full">
+              <label>Action</label>
+              <select v-model="evtForm.alarmAction" class="select" :disabled="editingEvent?.readOnly">
+                <option value="DISPLAY">Display</option>
+                <option value="EMAIL">Email</option>
+                <option value="AUDIO">Audio</option>
+              </select>
+            </div>
+            <div class="input-group full">
+              <label>Alarm Description</label>
+              <textarea v-model="evtForm.alarmDescription" class="input textarea" rows="2" placeholder="Reminder description..." :disabled="editingEvent?.readOnly"></textarea>
+            </div>
           </div>
 
           <div class="modal-buttons">
+            <button v-if="editingEvent" class="btn btn-outline btn-sm" @click="exportSingleEventICS" title="Export as .ics">📥 .ics</button>
+            <button v-if="editingEvent" class="btn btn-outline btn-sm" @click="openRawIcsModal" title="View/edit as raw ICS">📋 Raw</button>
             <button v-if="editingEvent && !editingEvent.readOnly" class="btn btn-outline danger-btn" @click="deleteCurrentEvent">🗑️ Delete</button>
             <span class="btn-spacer"></span>
             <button class="btn btn-outline" @click="showEventModal = false">Close</button>
@@ -630,6 +720,19 @@
         </div>
       </div>
 
+      <!-- Raw ICS view/edit -->
+      <div v-if="showRawIcsModal" class="modal-overlay" @click.self="showRawIcsModal = false">
+        <div class="modal-content modal-lg">
+          <h3>📋 Raw ICS</h3>
+          <p class="modal-hint">View or edit the raw iCalendar data for this event. Changes are applied to the form on "Apply".</p>
+          <textarea v-model="rawIcsContent" class="input textarea ics-textarea" rows="20" spellcheck="false"></textarea>
+          <div class="modal-buttons">
+            <button class="btn btn-outline" @click="showRawIcsModal = false">Close</button>
+            <button v-if="!editingEvent?.readOnly" class="btn btn-primary" @click="applyRawIcs">Apply</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Recycle Bin -->
       <div v-if="showRecycleBinModal" class="modal-overlay" @click.self="showRecycleBinModal = false">
         <div class="modal-content">
@@ -682,7 +785,7 @@
 
       <!-- Timezone datalist for autocomplete -->
       <datalist id="tz-list">
-        <option v-for="tz in ianaTimezones" :key="tz" :value="tz" />
+        <option v-for="label in ianaTimezonesWithOffset" :key="label" :value="label" />
       </datalist>
 
     </NuxtLayout>
@@ -727,6 +830,23 @@ interface CalEvent {
   tags: string[];
   caldavUrl?: string;
   readOnly?: boolean;
+  // Extended CalDAV fields
+  status?: string;          // CONFIRMED | TENTATIVE | CANCELLED
+  klass?: string;           // PUBLIC | PRIVATE | CONFIDENTIAL
+  priority?: number;        // 0-9
+  url?: string;
+  attachUris?: string[];
+  relatedTo?: string;
+  rrule?: string;
+  rdates?: string[];
+  exdates?: string[];
+  transp?: string;          // OPAQUE | TRANSPARENT
+  organizer?: string;
+  contact?: string;
+  attendees?: string[];
+  alarmTrigger?: string;    // e.g. -PT15M
+  alarmAction?: string;     // DISPLAY | EMAIL | AUDIO
+  alarmDescription?: string;
 }
 
 interface ParsedICSEvent {
@@ -743,6 +863,22 @@ interface ParsedICSEvent {
   allDay?: boolean;
   caldavUrl?: string;
   sourceTzid?: string;  // original TZID from ICS
+  status?: string;
+  klass?: string;
+  priority?: number;
+  url?: string;
+  attachUris?: string[];
+  relatedTo?: string;
+  rrule?: string;
+  rdates?: string[];
+  exdates?: string[];
+  transp?: string;
+  organizer?: string;
+  contact?: string;
+  attendees?: string[];
+  alarmTrigger?: string;
+  alarmAction?: string;
+  alarmDescription?: string;
 }
 
 interface RecycleBinEntry {
@@ -770,6 +906,8 @@ const showEventModal = ref(false);
 const showCalendarModal = ref(false);
 const showCalDAVModal = ref(false);
 const showImportExportModal = ref(false);
+const showRawIcsModal = ref(false);
+const rawIcsContent = ref('');
 
 const recycledCalendars = ref<RecycleBinEntry[]>([]);
 const showRecycleBinModal = ref(false);
@@ -784,7 +922,15 @@ const evtForm = ref({
   title: '', description: '', startDate: '', startTime: '09:00',
   endDate: '', endTime: '10:00', allDay: false,
   location: '', category: '', tagsInput: '', calendarId: '',
+  // Extended CalDAV fields
+  status: 'CONFIRMED', klass: 'PUBLIC', priority: 0, url: '',
+  attachInput: '', relatedTo: '', rrule: '',
+  rdateInput: '', exdateInput: '', transp: 'OPAQUE',
+  organizer: '', contact: '', attendeesInput: '',
+  alarmTrigger: '', alarmAction: 'DISPLAY', alarmDescription: '',
 });
+
+const evtTab = ref<'details' | 'recurrence' | 'participation' | 'alarms'>('details');
 
 // ─── Calendar form ────────────────────────────────────────────────────────────
 const calForm = ref({ name: '', color: '#3b82f6', url: '', username: '', password: '', editable: false, timezone: '' });
@@ -1147,7 +1293,13 @@ function openAddEventModal(date?: Date) {
     title: '', description: '', startDate: d, startTime: '09:00',
     endDate: d, endTime: '10:00', allDay: false,
     location: '', category: '', tagsInput: '', calendarId: defaultCalendarId(),
+    status: 'CONFIRMED', klass: 'PUBLIC', priority: 0, url: '',
+    attachInput: '', relatedTo: '', rrule: '',
+    rdateInput: '', exdateInput: '', transp: 'OPAQUE',
+    organizer: '', contact: '', attendeesInput: '',
+    alarmTrigger: '', alarmAction: 'DISPLAY', alarmDescription: '',
   };
+  evtTab.value = 'details';
   showEventModal.value = true;
 }
 
@@ -1160,7 +1312,17 @@ function openEditEventModal(evt: CalEvent) {
     allDay: evt.allDay, location: evt.location,
     category: evt.category, tagsInput: evt.tags.join(', '),
     calendarId: evt.calendarId,
+    status: evt.status ?? 'CONFIRMED', klass: evt.klass ?? 'PUBLIC',
+    priority: evt.priority ?? 0, url: evt.url ?? '',
+    attachInput: (evt.attachUris ?? []).join('\n'), relatedTo: evt.relatedTo ?? '',
+    rrule: evt.rrule ?? '', rdateInput: (evt.rdates ?? []).join('\n'),
+    exdateInput: (evt.exdates ?? []).join('\n'), transp: evt.transp ?? 'OPAQUE',
+    organizer: evt.organizer ?? '', contact: evt.contact ?? '',
+    attendeesInput: (evt.attendees ?? []).join('\n'),
+    alarmTrigger: evt.alarmTrigger ?? '', alarmAction: evt.alarmAction ?? 'DISPLAY',
+    alarmDescription: evt.alarmDescription ?? '',
   };
+  evtTab.value = 'details';
   showEventModal.value = true;
 }
 
@@ -1180,6 +1342,22 @@ function saveEvent() {
     category: evtForm.value.category,
     tags,
     calendarId: evtForm.value.calendarId,
+    status: evtForm.value.status || undefined,
+    klass: evtForm.value.klass || undefined,
+    priority: evtForm.value.priority || undefined,
+    url: evtForm.value.url || undefined,
+    attachUris: evtForm.value.attachInput ? evtForm.value.attachInput.split('\n').map(s=>s.trim()).filter(Boolean) : undefined,
+    relatedTo: evtForm.value.relatedTo || undefined,
+    rrule: evtForm.value.rrule || undefined,
+    rdates: evtForm.value.rdateInput ? evtForm.value.rdateInput.split('\n').map(s=>s.trim()).filter(Boolean) : undefined,
+    exdates: evtForm.value.exdateInput ? evtForm.value.exdateInput.split('\n').map(s=>s.trim()).filter(Boolean) : undefined,
+    transp: evtForm.value.transp || undefined,
+    organizer: evtForm.value.organizer || undefined,
+    contact: evtForm.value.contact || undefined,
+    attendees: evtForm.value.attendeesInput ? evtForm.value.attendeesInput.split('\n').map(s=>s.trim()).filter(Boolean) : undefined,
+    alarmTrigger: evtForm.value.alarmTrigger || undefined,
+    alarmAction: evtForm.value.alarmAction || undefined,
+    alarmDescription: evtForm.value.alarmDescription || undefined,
   };
 
   if (editingEvent.value) {
@@ -1204,7 +1382,12 @@ function deleteCurrentEvent() {
   const evt = editingEvent.value;
   events.value = events.value.filter(e => e.id !== evt.id);
   const cal = calendars.value.find(c => c.id === evt.calendarId);
-  if (cal?.isSubscription && cal.editable && evt.caldavUrl) deleteFromCalDAV(evt, cal);
+  if (cal?.isSubscription && cal.editable) {
+    // Construct URL if not directly stored (Nextcloud doesn't embed X-CALDAV-URL)
+    const delUrl = evt.caldavUrl
+      ?? `${cal.subscriptionUrl!.replace(/[?#].*$/, '').replace(/\/$/, '')}/${encodeURIComponent(evt.uid)}.ics`;
+    deleteFromCalDAV({ ...evt, caldavUrl: delUrl }, cal);
+  }
   saveToStorage();
   showEventModal.value = false;
 }
@@ -1222,6 +1405,11 @@ function handleTimeGridClick(e: MouseEvent, day: Date) {
   evtForm.value = {
     title: '', description: '', startDate: d, startTime, endDate: d, endTime,
     allDay: false, location: '', category: '', tagsInput: '', calendarId: defaultCalendarId(),
+    status: 'CONFIRMED', klass: 'PUBLIC', priority: 0, url: '',
+    attachInput: '', relatedTo: '', rrule: '',
+    rdateInput: '', exdateInput: '', transp: 'OPAQUE',
+    organizer: '', contact: '', attendeesInput: '',
+    alarmTrigger: '', alarmAction: 'DISPLAY', alarmDescription: '',
   };
   showEventModal.value = true;
 }
@@ -1247,6 +1435,7 @@ function openEditCalendarModal(cal: Calendar) {
 
 function saveCalendar() {
   if (!calForm.value.name.trim()) return;
+  const tz = normalizeTz(calForm.value.timezone); calForm.value.timezone = tz;
   if (editingCalendar.value) {
     const idx = calendars.value.findIndex(c => c.id === editingCalendar.value!.id);
     if (idx >= 0) {
@@ -1378,7 +1567,7 @@ async function subscribeAllCalDAV() {
       const icsText = await fetchViaProxy(cal.href, cdCreds.value.username, cdCreds.value.password);
       // Try to detect calendar timezone from VTIMEZONE if not manually set
       const detectedTZ = extractVTimezoneId(icsText);
-      const calTZ = cal.timezone || detectedTZ || calSettings.value.myTimezone;
+      const calTZ = normalizeTz(cal.timezone || detectedTZ || calSettings.value.myTimezone);
       const calId = crypto.randomUUID();
       calendars.value.push({
         id: calId, name: cal.name, color: cal.color,
@@ -1450,6 +1639,22 @@ async function syncCalDAV(cal: Calendar) {
           tags: pe.tags ?? existing.tags,
           caldavUrl: pe.caldavUrl ?? existing.caldavUrl,
           readOnly: !cal.editable,
+          status: pe.status ?? existing.status,
+          klass: pe.klass ?? existing.klass,
+          priority: pe.priority ?? existing.priority,
+          url: pe.url ?? existing.url,
+          attachUris: pe.attachUris ?? existing.attachUris,
+          relatedTo: pe.relatedTo ?? existing.relatedTo,
+          rrule: pe.rrule ?? existing.rrule,
+          rdates: pe.rdates ?? existing.rdates,
+          exdates: pe.exdates ?? existing.exdates,
+          transp: pe.transp ?? existing.transp,
+          organizer: pe.organizer ?? existing.organizer,
+          contact: pe.contact ?? existing.contact,
+          attendees: pe.attendees ?? existing.attendees,
+          alarmTrigger: pe.alarmTrigger ?? existing.alarmTrigger,
+          alarmAction: pe.alarmAction ?? existing.alarmAction,
+          alarmDescription: pe.alarmDescription ?? existing.alarmDescription,
         };
       } else {
         // New event from server — add it
@@ -1469,6 +1674,22 @@ async function syncCalDAV(cal: Calendar) {
           tags: pe.tags ?? [],
           caldavUrl: pe.caldavUrl,
           readOnly: !cal.editable,
+          status: pe.status,
+          klass: pe.klass,
+          priority: pe.priority,
+          url: pe.url,
+          attachUris: pe.attachUris,
+          relatedTo: pe.relatedTo,
+          rrule: pe.rrule,
+          rdates: pe.rdates,
+          exdates: pe.exdates,
+          transp: pe.transp,
+          organizer: pe.organizer,
+          contact: pe.contact,
+          attendees: pe.attendees,
+          alarmTrigger: pe.alarmTrigger,
+          alarmAction: pe.alarmAction,
+          alarmDescription: pe.alarmDescription,
         });
       }
     }
@@ -1534,6 +1755,26 @@ async function deleteFromCalDAV(evt: CalEvent, cal: Calendar) {
 const ianaTimezones: string[] = (() => {
   try { return (Intl as any).supportedValuesOf('timeZone') as string[]; } catch { return []; }
 })();
+
+/** Returns " (UTC+X)" string for a given IANA timezone at the current moment */
+function getUtcOffsetLabel(tz: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en', {
+      timeZone: tz, timeZoneName: 'shortOffset',
+    }).formatToParts(new Date());
+    const raw = parts.find(p => p.type === 'timeZoneName')?.value ?? '';
+    return raw ? ` (${raw.replace('GMT', 'UTC')})` : '';
+  } catch { return ''; }
+}
+
+/** Strip " (UTC...)" or " (GMT...)" suffix from a timezone string to get the pure IANA ID */
+function normalizeTz(s: string): string {
+  return s.replace(/\s*\([^)]*\)\s*$/, '').trim();
+}
+
+const ianaTimezonesWithOffset = computed(() =>
+  ianaTimezones.map(tz => `${tz}${getUtcOffsetLabel(tz)}`)
+);
 
 /**
  * Convert a wall-clock date+time expressed in `tz` to a UTC Date.
@@ -1638,6 +1879,27 @@ function generateICS(evts: CalEvent[]): string {
         lines.push(`DTEND:${e.endDate.replace(/-/g, '')}T${e.endTime.replace(':', '')}00`);
       }
     }
+    if (e.status)    lines.push(`STATUS:${e.status}`);
+    if (e.klass)     lines.push(`CLASS:${e.klass}`);
+    if (e.priority !== undefined && e.priority > 0) lines.push(`PRIORITY:${e.priority}`);
+    if (e.url)       lines.push(foldLine(`URL:${e.url}`));
+    for (const a of (e.attachUris ?? [])) lines.push(foldLine(`ATTACH:${a}`));
+    if (e.relatedTo) lines.push(`RELATED-TO:${e.relatedTo}`);
+    if (e.rrule)     lines.push(`RRULE:${e.rrule}`);
+    for (const rd of (e.rdates ?? [])) lines.push(`RDATE:${rd}`);
+    for (const ex of (e.exdates ?? [])) lines.push(`EXDATE:${ex}`);
+    if (e.transp)    lines.push(`TRANSP:${e.transp}`);
+    if (e.organizer) lines.push(`ORGANIZER:${e.organizer}`);
+    if (e.contact)   lines.push(foldLine(`CONTACT:${escapeICS(e.contact)}`));
+    for (const att of (e.attendees ?? [])) lines.push(foldLine(`ATTENDEE:${att}`));
+    if (e.alarmTrigger) {
+      lines.push('BEGIN:VALARM');
+      lines.push(`ACTION:${e.alarmAction ?? 'DISPLAY'}`);
+      lines.push(`TRIGGER:${e.alarmTrigger}`);
+      if (e.alarmDescription) lines.push(foldLine(`DESCRIPTION:${escapeICS(e.alarmDescription)}`));
+      else lines.push(`DESCRIPTION:Reminder`);
+      lines.push('END:VALARM');
+    }
     lines.push('END:VEVENT');
   }
   lines.push('END:VCALENDAR');
@@ -1657,6 +1919,82 @@ function exportICS() {
   URL.revokeObjectURL(url);
 }
 
+function exportSingleEventICS() {
+  if (!editingEvent.value) return;
+  const evt = editingEvent.value;
+  const blob = new Blob([generateICS([evt])], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), {
+    href: url,
+    download: `${evt.title.replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '_') || 'event'}.ics`,
+  });
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function openRawIcsModal() {
+  if (!editingEvent.value && !evtForm.value.title) return;
+  const tempEvt: CalEvent = editingEvent.value
+    ? { ...editingEvent.value }
+    : {
+        id: '', uid: crypto.randomUUID() + '@ronbureau', calendarId: evtForm.value.calendarId,
+        title: evtForm.value.title, description: evtForm.value.description,
+        startDate: evtForm.value.startDate, startTime: evtForm.value.startTime,
+        endDate: evtForm.value.endDate, endTime: evtForm.value.endTime,
+        allDay: evtForm.value.allDay, location: evtForm.value.location,
+        category: evtForm.value.category,
+        tags: evtForm.value.tagsInput.split(',').map(t=>t.trim()).filter(Boolean),
+        status: evtForm.value.status, klass: evtForm.value.klass,
+        priority: evtForm.value.priority || undefined, url: evtForm.value.url,
+        attachUris: evtForm.value.attachInput ? evtForm.value.attachInput.split('\n').map(s=>s.trim()).filter(Boolean) : [],
+        relatedTo: evtForm.value.relatedTo, rrule: evtForm.value.rrule,
+        rdates: evtForm.value.rdateInput ? evtForm.value.rdateInput.split('\n').map(s=>s.trim()).filter(Boolean) : [],
+        exdates: evtForm.value.exdateInput ? evtForm.value.exdateInput.split('\n').map(s=>s.trim()).filter(Boolean) : [],
+        transp: evtForm.value.transp, organizer: evtForm.value.organizer,
+        contact: evtForm.value.contact,
+        attendees: evtForm.value.attendeesInput ? evtForm.value.attendeesInput.split('\n').map(s=>s.trim()).filter(Boolean) : [],
+        alarmTrigger: evtForm.value.alarmTrigger, alarmAction: evtForm.value.alarmAction,
+        alarmDescription: evtForm.value.alarmDescription,
+      };
+  rawIcsContent.value = generateICS([tempEvt]);
+  showRawIcsModal.value = true;
+}
+
+function applyRawIcs() {
+  try {
+    const parsed = parseICS(rawIcsContent.value, { userTZ: calSettings.value.myTimezone });
+    if (!parsed.length) { alert('No valid VEVENT found in ICS.'); return; }
+    const pe = parsed[0];
+    if (pe.title) evtForm.value.title = pe.title;
+    if (pe.description !== undefined) evtForm.value.description = pe.description;
+    if (pe.startDate) { evtForm.value.startDate = pe.startDate; evtForm.value.startTime = pe.startTime ?? evtForm.value.startTime; }
+    if (pe.endDate) { evtForm.value.endDate = pe.endDate; evtForm.value.endTime = pe.endTime ?? evtForm.value.endTime; }
+    if (pe.allDay !== undefined) evtForm.value.allDay = pe.allDay;
+    if (pe.location !== undefined) evtForm.value.location = pe.location;
+    if (pe.category !== undefined) evtForm.value.category = pe.category;
+    if (pe.tags) evtForm.value.tagsInput = pe.tags.join(', ');
+    if (pe.status) evtForm.value.status = pe.status;
+    if (pe.klass) evtForm.value.klass = pe.klass;
+    if (pe.priority !== undefined) evtForm.value.priority = pe.priority;
+    if (pe.url !== undefined) evtForm.value.url = pe.url;
+    if (pe.attachUris?.length) evtForm.value.attachInput = pe.attachUris.join('\n');
+    if (pe.relatedTo) evtForm.value.relatedTo = pe.relatedTo;
+    if (pe.rrule) evtForm.value.rrule = pe.rrule;
+    if (pe.rdates?.length) evtForm.value.rdateInput = pe.rdates.join('\n');
+    if (pe.exdates?.length) evtForm.value.exdateInput = pe.exdates.join('\n');
+    if (pe.transp) evtForm.value.transp = pe.transp;
+    if (pe.organizer) evtForm.value.organizer = pe.organizer;
+    if (pe.contact) evtForm.value.contact = pe.contact;
+    if (pe.attendees?.length) evtForm.value.attendeesInput = pe.attendees.join('\n');
+    if (pe.alarmTrigger) evtForm.value.alarmTrigger = pe.alarmTrigger;
+    if (pe.alarmAction) evtForm.value.alarmAction = pe.alarmAction;
+    if (pe.alarmDescription) evtForm.value.alarmDescription = pe.alarmDescription;
+    showRawIcsModal.value = false;
+  } catch (e) {
+    alert('Failed to parse ICS: ' + (e instanceof Error ? e.message : String(e)));
+  }
+}
+
 // ─── ICS Import ───────────────────────────────────────────────────────────────
 
 function parseICS(content: string, options?: { calTZ?: string; userTZ?: string }): ParsedICSEvent[] {
@@ -1666,6 +2004,7 @@ function parseICS(content: string, options?: { calTZ?: string; userTZ?: string }
   const lines = unfolded.split(/\r?\n/);
   const result: ParsedICSEvent[] = [];
   let cur: ParsedICSEvent | null = null;
+  let inValarm = false;
 
   // Extract primary VTIMEZONE TZID as the default calendar timezone
   const vtimezone = extractVTimezoneId(content);
@@ -1707,8 +2046,10 @@ function parseICS(content: string, options?: { calTZ?: string; userTZ?: string }
   }
 
   for (const line of lines) {
-    if (line.trim() === 'BEGIN:VEVENT') { cur = {}; continue; }
-    if (line.trim() === 'END:VEVENT') { if (cur?.title) result.push(cur); cur = null; continue; }
+    if (line.trim() === 'BEGIN:VEVENT') { cur = {}; inValarm = false; continue; }
+    if (line.trim() === 'END:VEVENT') { if (cur?.title) result.push(cur); cur = null; inValarm = false; continue; }
+    if (line.trim() === 'BEGIN:VALARM') { inValarm = true; continue; }
+    if (line.trim() === 'END:VALARM') { inValarm = false; continue; }
     if (!cur) continue;
 
     const ci = line.indexOf(':');
@@ -1722,12 +2063,30 @@ function parseICS(content: string, options?: { calTZ?: string; userTZ?: string }
 
     switch (base) {
       case 'SUMMARY':     cur.title = val; break;
-      case 'DESCRIPTION': cur.description = val; break;
+      case 'DESCRIPTION':
+        if (inValarm) cur.alarmDescription = val;
+        else cur.description = val;
+        break;
       case 'LOCATION':    cur.location = val; break;
       case 'CATEGORIES':  cur.category = val.split(',')[0].trim(); break;
       case 'X-TAGS':      cur.tags = val.split(',').map(t => t.trim()).filter(Boolean); break;
       case 'X-CALDAV-URL': cur.caldavUrl = rawVal.trim(); break;
       case 'UID':         cur.uid = val; break;
+      case 'STATUS':      cur.status = val.toUpperCase(); break;
+      case 'CLASS':       cur.klass = val.toUpperCase(); break;
+      case 'PRIORITY':    cur.priority = parseInt(val) || 0; break;
+      case 'URL':         cur.url = val; break;
+      case 'ATTACH':      cur.attachUris = [...(cur.attachUris ?? []), rawVal.trim()]; break;
+      case 'RELATED-TO':  cur.relatedTo = val; break;
+      case 'RRULE':       cur.rrule = rawVal.trim(); break;
+      case 'RDATE':       cur.rdates = [...(cur.rdates ?? []), rawVal.trim()]; break;
+      case 'EXDATE':      cur.exdates = [...(cur.exdates ?? []), rawVal.trim()]; break;
+      case 'TRANSP':      cur.transp = val.toUpperCase(); break;
+      case 'ORGANIZER':   cur.organizer = rawVal.trim(); break;
+      case 'CONTACT':     cur.contact = val; break;
+      case 'ATTENDEE':    cur.attendees = [...(cur.attendees ?? []), rawVal.trim()]; break;
+      case 'TRIGGER':     if (inValarm) cur.alarmTrigger = rawVal.trim(); break;
+      case 'ACTION':      if (inValarm) cur.alarmAction = val.toUpperCase(); break;
       case 'DTSTART': {
         const dt = parseDT(rawVal, params);
         cur.allDay = dt.allDay;
@@ -1773,6 +2132,22 @@ function importParsedEvents(parsed: ParsedICSEvent[], calId: string, readOnly = 
       tags: pe.tags ?? [],
       caldavUrl: pe.caldavUrl,
       readOnly,
+      status: pe.status,
+      klass: pe.klass,
+      priority: pe.priority,
+      url: pe.url,
+      attachUris: pe.attachUris,
+      relatedTo: pe.relatedTo,
+      rrule: pe.rrule,
+      rdates: pe.rdates,
+      exdates: pe.exdates,
+      transp: pe.transp,
+      organizer: pe.organizer,
+      contact: pe.contact,
+      attendees: pe.attendees,
+      alarmTrigger: pe.alarmTrigger,
+      alarmAction: pe.alarmAction,
+      alarmDescription: pe.alarmDescription,
     });
   }
 }
@@ -2176,6 +2551,7 @@ function loadFromStorage() {
 }
 
 function saveSettings() {
+  calSettings.value.myTimezone = normalizeTz(calSettings.value.myTimezone);
   saveToStorage();
   showSettingsModal.value = false;
 }
@@ -2213,6 +2589,7 @@ onUnmounted(() => {
 });
 
 function closeTopmostModal() {
+  if (showRawIcsModal.value) { showRawIcsModal.value = false; return; }
   if (showEventModal.value) { showEventModal.value = false; return; }
   if (showCalendarModal.value) { showCalendarModal.value = false; return; }
   if (showCalDAVModal.value) { showCalDAVModal.value = false; return; }
@@ -2798,5 +3175,24 @@ watch(currentView, (v) => {
 .dp-dots { display: flex; gap: 2px; flex-wrap: wrap; justify-content: center; min-height: 6px; }
 .dp-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
 .date-picker-btn { font-size: 0.85rem; }
+
+/* ── Event modal tabs ────────────────────────────────────────────────────────*/
+.evt-tabs {
+  display: flex; gap: 2px; margin-bottom: 0.75rem;
+  border-bottom: 2px solid var(--color-border);
+}
+.evt-tab {
+  background: none; border: none; cursor: pointer;
+  padding: 0.4rem 0.8rem; font-size: 0.8rem;
+  color: var(--color-text-muted);
+  border-bottom: 2px solid transparent; margin-bottom: -2px;
+  border-radius: var(--radius) var(--radius) 0 0;
+  transition: color 0.15s, border-color 0.15s;
+}
+.evt-tab:hover { color: var(--color-text); }
+.evt-tab.active { color: var(--color-primary); border-bottom-color: var(--color-primary); font-weight: 600; }
+
+/* ── Raw ICS textarea ────────────────────────────────────────────────────────*/
+.ics-textarea { font-family: monospace; font-size: 0.78rem; line-height: 1.4; resize: vertical; }
 
 </style>
