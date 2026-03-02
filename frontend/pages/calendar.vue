@@ -347,6 +347,10 @@
             <label>Color</label>
             <input v-model="calForm.color" type="color" class="input color-input" />
           </div>
+          <div class="input-group">
+            <label>Timezone</label>
+            <input v-model="calForm.timezone" type="text" class="input" list="tz-list" placeholder="e.g. Europe/Paris" />
+          </div>
           <template v-if="editingCalendar?.isSubscription">
             <div class="input-group">
               <label>URL</label>
@@ -428,6 +432,7 @@
                 </label>
                 <input type="color" v-model="cal.color" class="color-picker-inline" :disabled="!cal.included" />
                 <input v-model="cal.name" type="text" class="input cd-cal-name" :disabled="!cal.included" :placeholder="'Calendar ' + (i + 1)" />
+                <input v-model="cal.timezone" type="text" class="input cd-cal-tz" list="tz-list" :disabled="!cal.included" :placeholder="calSettings.myTimezone" />
                 <label :class="['cd-mode-label', { 'cd-mode-disabled': !cal.included }]">
                   <input type="checkbox" v-model="cal.editable" :disabled="!cal.included" />
                   Editable
@@ -451,6 +456,7 @@
                 <span class="cal-dot" :style="{ backgroundColor: cal.color }"></span>
                 <span class="cd-sum-name">{{ cal.name }}</span>
                 <span class="cd-sum-badge">{{ cal.editable ? '✏️ Editable' : '👁️ Read-only' }}</span>
+                <span class="cd-sum-badge">🕐 {{ cal.timezone }}</span>
               </div>
             </div>
             <div v-if="cdError" class="status-msg error">{{ cdError }}</div>
@@ -562,6 +568,12 @@
           <h3>⚙️ Settings</h3>
 
           <div class="input-group">
+            <label>My Timezone</label>
+            <input v-model="calSettings.myTimezone" type="text" class="input" list="tz-list" placeholder="e.g. Europe/Paris" />
+            <span class="hint">Times from other timezones are converted to this timezone for display.</span>
+          </div>
+
+          <div class="input-group">
             <label>Default view on open</label>
             <div class="view-switcher">
               <button class="view-btn" :class="{ active: calSettings.defaultView === 'day' }" @click="calSettings.defaultView = 'day'">Day</button>
@@ -593,6 +605,11 @@
         </div>
       </div>
 
+      <!-- Timezone datalist for autocomplete -->
+      <datalist id="tz-list">
+        <option v-for="tz in ianaTimezones" :key="tz" :value="tz" />
+      </datalist>
+
     </NuxtLayout>
   </div>
 </template>
@@ -616,6 +633,7 @@ interface Calendar {
   username?: string;
   password?: string;
   editable?: boolean;
+  timezone?: string;  // IANA timezone, e.g. 'America/New_York'
 }
 
 interface CalEvent {
@@ -649,6 +667,7 @@ interface ParsedICSEvent {
   endTime?: string;
   allDay?: boolean;
   caldavUrl?: string;
+  sourceTzid?: string;  // original TZID from ICS
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -682,12 +701,12 @@ const evtForm = ref({
 });
 
 // ─── Calendar form ────────────────────────────────────────────────────────────
-const calForm = ref({ name: '', color: '#3b82f6', url: '', username: '', password: '', editable: false });
+const calForm = ref({ name: '', color: '#3b82f6', url: '', username: '', password: '', editable: false, timezone: '' });
 
 // ─── CalDAV wizard ────────────────────────────────────────────────────────────
 const RAINBOW = ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#8b5cf6','#ec4899'];
 
-interface CdCalendarEntry { href: string; name: string; color: string; editable: boolean; included: boolean; }
+interface CdCalendarEntry { href: string; name: string; color: string; editable: boolean; included: boolean; timezone: string; }
 
 const cdStep   = ref<1 | 2 | 3>(1);
 const cdCreds  = ref({ url: '', username: '', password: '' });
@@ -725,8 +744,14 @@ interface CalSettings {
   defaultView: 'day' | 'week' | 'month';
   startHour: number;
   textWrap: boolean;
+  myTimezone: string;
 }
-const calSettings = ref<CalSettings>({ defaultView: 'week', startHour: 8, textWrap: false });
+const calSettings = ref<CalSettings>({
+  defaultView: 'week',
+  startHour: 8,
+  textWrap: false,
+  myTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+});
 const showSettingsModal = ref(false);
 
 // ─── Computed ─────────────────────────────────────────────────────────────────
@@ -1058,7 +1083,7 @@ function handleTimeGridClick(e: MouseEvent, day: Date) {
 
 function openAddCalendarModal() {
   editingCalendar.value = null;
-  calForm.value = { name: '', color: getRandomColor(), url: '', username: '', password: '', editable: false };
+  calForm.value = { name: '', color: getRandomColor(), url: '', username: '', password: '', editable: false, timezone: calSettings.value.myTimezone };
   showCalendarModal.value = true;
 }
 
@@ -1068,6 +1093,7 @@ function openEditCalendarModal(cal: Calendar) {
     name: cal.name, color: cal.color,
     url: cal.subscriptionUrl ?? '', username: cal.username ?? '',
     password: cal.password ?? '', editable: cal.editable ?? false,
+    timezone: cal.timezone ?? calSettings.value.myTimezone,
   };
   showCalendarModal.value = true;
 }
@@ -1077,7 +1103,7 @@ function saveCalendar() {
   if (editingCalendar.value) {
     const idx = calendars.value.findIndex(c => c.id === editingCalendar.value!.id);
     if (idx >= 0) {
-      const updates: Partial<Calendar> = { name: calForm.value.name, color: calForm.value.color };
+      const updates: Partial<Calendar> = { name: calForm.value.name, color: calForm.value.color, timezone: calForm.value.timezone || undefined };
       if (calendars.value[idx].isSubscription) {
         updates.subscriptionUrl = calForm.value.url || undefined;
         updates.username = calForm.value.username || undefined;
@@ -1087,7 +1113,7 @@ function saveCalendar() {
       calendars.value[idx] = { ...calendars.value[idx], ...updates };
     }
   } else {
-    calendars.value.push({ id: crypto.randomUUID(), name: calForm.value.name, color: calForm.value.color, visible: true, isSubscription: false });
+    calendars.value.push({ id: crypto.randomUUID(), name: calForm.value.name, color: calForm.value.color, visible: true, isSubscription: false, timezone: calForm.value.timezone || undefined });
   }
   saveToStorage();
   showCalendarModal.value = false;
@@ -1158,6 +1184,7 @@ async function discoverCalendars() {
       color: d.color ?? RAINBOW[i % RAINBOW.length],
       editable: false,
       included: true,
+      timezone: calSettings.value.myTimezone,
     }));
     cdStep.value = 2;
   } catch (err: unknown) {
@@ -1180,14 +1207,18 @@ async function subscribeAllCalDAV() {
   try {
     for (const cal of cdSelected.value.filter(c => c.included)) {
       const icsText = await fetchViaProxy(cal.href, cdCreds.value.username, cdCreds.value.password);
+      // Try to detect calendar timezone from VTIMEZONE if not manually set
+      const detectedTZ = extractVTimezoneId(icsText);
+      const calTZ = cal.timezone || detectedTZ || calSettings.value.myTimezone;
       const calId = crypto.randomUUID();
       calendars.value.push({
         id: calId, name: cal.name, color: cal.color,
         visible: true, isSubscription: true, subscriptionUrl: cal.href,
         username: cdCreds.value.username || undefined, password: cdCreds.value.password || undefined,
         editable: cal.editable,
+        timezone: calTZ,
       });
-      importParsedEvents(parseICS(icsText), calId, !cal.editable);
+      importParsedEvents(parseICS(icsText, { calTZ, userTZ: calSettings.value.myTimezone }), calId, !cal.editable);
     }
     saveToStorage();
     showCalDAVModal.value = false;
@@ -1206,7 +1237,7 @@ async function syncCalDAV(cal: Calendar) {
   if (!cal.subscriptionUrl) return;
   try {
     const icsText = await fetchViaProxy(cal.subscriptionUrl, cal.username, cal.password);
-    const parsed = parseICS(icsText);
+    const parsed = parseICS(icsText, { calTZ: cal.timezone, userTZ: calSettings.value.myTimezone });
 
     // Build a set of UIDs present on the remote server
     const remoteUids = new Set(parsed.filter(p => p.uid).map(p => p.uid!));
@@ -1322,6 +1353,71 @@ async function deleteFromCalDAV(evt: CalEvent, cal: Calendar) {
   }
 }
 
+// ─── Timezone Utilities ───────────────────────────────────────────────────────
+
+/** List of IANA timezone IDs for autocomplete */
+const ianaTimezones: string[] = (() => {
+  try { return (Intl as any).supportedValuesOf('timeZone') as string[]; } catch { return []; }
+})();
+
+/**
+ * Convert a wall-clock date+time expressed in `tz` to a UTC Date.
+ * Uses a two-pass approach to handle DST edge cases.
+ */
+function wallToUTC(dateStr: string, timeStr: string, tz: string): Date {
+  const [y, mo, d] = dateStr.split('-').map(Number);
+  const [h, mi] = (timeStr || '00:00').split(':').map(Number);
+  const guessMs = Date.UTC(y, mo - 1, d, h, mi, 0);
+
+  function offsetAt(utcMs: number): number {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+    }).formatToParts(new Date(utcMs));
+    const g = (t: string) => parseInt(parts.find(p => p.type === t)?.value ?? '0');
+    const tzMs = Date.UTC(g('year'), g('month') - 1, g('day'), g('hour'), g('minute'), g('second'));
+    return (tzMs - utcMs) / 60000;
+  }
+
+  const off1 = offsetAt(guessMs);
+  const approx = guessMs - off1 * 60000;
+  const off2 = offsetAt(approx);
+  return new Date(guessMs - off2 * 60000);
+}
+
+/**
+ * Format a UTC Date as wall-clock {date, time} in a given IANA timezone.
+ */
+function utcToWall(date: Date, tz: string): { date: string; time: string } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(date);
+  const g = (t: string) => parts.find(p => p.type === t)?.value ?? '00';
+  const hh = g('hour') === '24' ? '00' : g('hour');
+  return { date: `${g('year')}-${g('month')}-${g('day')}`, time: `${hh}:${g('minute')}` };
+}
+
+/**
+ * Convert wall-clock date+time from one IANA timezone to another.
+ * Returns unchanged values if both timezones are the same.
+ */
+function convertWallClock(dateStr: string, timeStr: string, fromTZ: string, toTZ: string): { date: string; time: string } {
+  if (!dateStr || !timeStr) return { date: dateStr, time: timeStr };
+  if (fromTZ === toTZ) return { date: dateStr, time: timeStr };
+  try {
+    return utcToWall(wallToUTC(dateStr, timeStr, fromTZ), toTZ);
+  } catch {
+    return { date: dateStr, time: timeStr }; // fallback: no conversion
+  }
+}
+
+/** Extract the primary TZID from a VTIMEZONE block in ICS content */
+function extractVTimezoneId(content: string): string | null {
+  const m = content.match(/BEGIN:VTIMEZONE[\s\S]*?TZID:([^\r\n]+)/);
+  return m ? m[1].trim() : null;
+}
+
 // ─── ICS Export ───────────────────────────────────────────────────────────────
 
 function escapeICS(v: string): string {
@@ -1338,6 +1434,7 @@ function foldLine(line: string): string {
 function generateICS(evts: CalEvent[]): string {
   // Format: YYYYMMDDTHHmmssZ (ISO 8601 basic format without milliseconds)
   const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '') + 'Z';
+  const userTZ = calSettings.value.myTimezone;
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//RonBureau//Calendar 1.0//EN', 'CALSCALE:GREGORIAN'];
   for (const e of evts) {
     lines.push('BEGIN:VEVENT');
@@ -1355,8 +1452,16 @@ function generateICS(evts: CalEvent[]): string {
       const excl = new Date(ey, em - 1, ed + 1);
       lines.push(`DTEND;VALUE=DATE:${dateStr(excl).replace(/-/g, '')}`);
     } else {
-      lines.push(`DTSTART:${e.startDate.replace(/-/g, '')}T${e.startTime.replace(':', '')}00`);
-      lines.push(`DTEND:${e.endDate.replace(/-/g, '')}T${e.endTime.replace(':', '')}00`);
+      // Convert wall-clock times from user's timezone to UTC
+      const fmtUTC = (d: Date) => d.toISOString().slice(0, 19).replace(/[-:]/g, '') + 'Z';
+      try {
+        lines.push(`DTSTART:${fmtUTC(wallToUTC(e.startDate, e.startTime, userTZ))}`);
+        lines.push(`DTEND:${fmtUTC(wallToUTC(e.endDate, e.endTime, userTZ))}`);
+      } catch {
+        // Fallback: write as naive local time (no timezone suffix)
+        lines.push(`DTSTART:${e.startDate.replace(/-/g, '')}T${e.startTime.replace(':', '')}00`);
+        lines.push(`DTEND:${e.endDate.replace(/-/g, '')}T${e.endTime.replace(':', '')}00`);
+      }
     }
     lines.push('END:VEVENT');
   }
@@ -1379,12 +1484,52 @@ function exportICS() {
 
 // ─── ICS Import ───────────────────────────────────────────────────────────────
 
-function parseICS(content: string): ParsedICSEvent[] {
+function parseICS(content: string, options?: { calTZ?: string; userTZ?: string }): ParsedICSEvent[] {
+  const userTZ = options?.userTZ || calSettings.value.myTimezone;
   // Unfold (RFC 5545: CRLF + LWSP-char)
   const unfolded = content.replace(/\r\n([ \t])/g, '$1').replace(/\n([ \t])/g, '$1');
   const lines = unfolded.split(/\r?\n/);
   const result: ParsedICSEvent[] = [];
   let cur: ParsedICSEvent | null = null;
+
+  // Extract primary VTIMEZONE TZID as the default calendar timezone
+  const vtimezone = extractVTimezoneId(content);
+  const calTZ = options?.calTZ || vtimezone || userTZ;
+
+  /** Parse a DTSTART/DTEND value into {date, time, allDay}, converting to userTZ */
+  function parseDT(rawVal: string, params: string): { date: string; time: string; allDay: boolean; tzid: string } {
+    const isUtcSuffix = rawVal.trimEnd().endsWith('Z');
+    const clean = rawVal.replace(/Z\s*$/, '').trim();
+
+    // Detect explicit TZID in params: ;TZID=America/New_York
+    const tzidMatch = params.match(/TZID=([^;:]+)/i);
+    const explicitTzid = tzidMatch ? tzidMatch[1].trim() : null;
+
+    const dateOnly = (params.toUpperCase().includes('VALUE=DATE') && !params.toUpperCase().includes('DATE-TIME'))
+      || (clean.length === 8 && /^\d{8}$/.test(clean));
+
+    if (dateOnly) {
+      return {
+        date: `${clean.slice(0,4)}-${clean.slice(4,6)}-${clean.slice(6,8)}`,
+        time: '00:00', allDay: true,
+        tzid: calTZ,
+      };
+    }
+
+    const ti = clean.indexOf('T');
+    const dp = ti > 0 ? clean.substring(0, ti) : clean;
+    const tp = ti > 0 ? clean.substring(ti + 1) : '000000';
+    const dateRaw = `${dp.slice(0,4)}-${dp.slice(4,6)}-${dp.slice(6,8)}`;
+    const timeRaw = `${tp.slice(0,2)}:${tp.slice(2,4)}`;
+
+    // Determine source timezone
+    const sourceTZ = isUtcSuffix ? 'UTC' : (explicitTzid ?? calTZ);
+    const tzid = sourceTZ;
+
+    // Convert to userTZ
+    const converted = convertWallClock(dateRaw, timeRaw, sourceTZ, userTZ);
+    return { date: converted.date, time: converted.time, allDay: false, tzid };
+  }
 
   for (const line of lines) {
     if (line.trim() === 'BEGIN:VEVENT') { cur = {}; continue; }
@@ -1398,7 +1543,7 @@ function parseICS(content: string): ParsedICSEvent[] {
     const val = rawVal.replace(/\\n/gi, '\n').replace(/\\,/g, ',').replace(/\\;/g, ';').replace(/\\\\/g, '\\').trim();
     const si = prop.indexOf(';');
     const base = (si >= 0 ? prop.substring(0, si) : prop).toUpperCase();
-    const params = (si >= 0 ? prop.substring(si) : '').toUpperCase();
+    const params = si >= 0 ? prop.substring(si) : '';
 
     switch (base) {
       case 'SUMMARY':     cur.title = val; break;
@@ -1409,34 +1554,23 @@ function parseICS(content: string): ParsedICSEvent[] {
       case 'X-CALDAV-URL': cur.caldavUrl = rawVal.trim(); break;
       case 'UID':         cur.uid = val; break;
       case 'DTSTART': {
-        const dateOnly = params.includes('VALUE=DATE') && !params.includes('DATE-TIME');
-        const clean = rawVal.replace('Z', '').trim();
-        if (dateOnly || (clean.length === 8 && /^\d{8}$/.test(clean))) {
-          cur.allDay = true;
-          cur.startDate = `${clean.slice(0,4)}-${clean.slice(4,6)}-${clean.slice(6,8)}`;
-        } else {
-          const ti = clean.indexOf('T');
-          const d = ti > 0 ? clean.substring(0, ti) : clean;
-          const t = ti > 0 ? clean.substring(ti + 1) : '';
-          cur.startDate = `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`;
-          if (t) cur.startTime = `${t.slice(0,2)}:${t.slice(2,4)}`;
-        }
+        const dt = parseDT(rawVal, params);
+        cur.allDay = dt.allDay;
+        cur.startDate = dt.date;
+        if (!dt.allDay) cur.startTime = dt.time;
+        cur.sourceTzid = dt.tzid;
         break;
       }
       case 'DTEND': {
-        const dateOnly = params.includes('VALUE=DATE') && !params.includes('DATE-TIME');
-        const clean = rawVal.replace('Z', '').trim();
-        if (dateOnly || (clean.length === 8 && /^\d{8}$/.test(clean))) {
+        const dt = parseDT(rawVal, params);
+        if (dt.allDay) {
           // ICS all-day end is exclusive; subtract 1 day
-          const endEx = new Date(parseInt(clean.slice(0,4)), parseInt(clean.slice(4,6))-1, parseInt(clean.slice(6,8)));
+          const endEx = new Date(parseInt(dt.date.slice(0,4)), parseInt(dt.date.slice(5,7))-1, parseInt(dt.date.slice(8,10)));
           endEx.setDate(endEx.getDate() - 1);
           cur.endDate = dateStr(endEx);
         } else {
-          const ti = clean.indexOf('T');
-          const d = ti > 0 ? clean.substring(0, ti) : clean;
-          const t = ti > 0 ? clean.substring(ti + 1) : '';
-          cur.endDate = `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`;
-          if (t) cur.endTime = `${t.slice(0,2)}:${t.slice(2,4)}`;
+          cur.endDate = dt.date;
+          cur.endTime = dt.time;
         }
         break;
       }
@@ -1476,7 +1610,12 @@ function importICSFile(event: Event) {
   const reader = new FileReader();
   reader.onload = (ev) => {
     try {
-      const parsed = parseICS(ev.target?.result as string);
+      const icsContent = ev.target?.result as string;
+      const targetCal = calendars.value.find(c => c.id === calId);
+      const parsed = parseICS(icsContent, {
+        calTZ: targetCal?.timezone || extractVTimezoneId(icsContent) || calSettings.value.myTimezone,
+        userTZ: calSettings.value.myTimezone,
+      });
       const before = events.value.length;
       importParsedEvents(parsed, calId);
       saveToStorage();
@@ -2399,7 +2538,10 @@ watch(currentView, (v) => {
 /* ── Settings modal ──────────────────────────────────────────────────────────*/
 .settings-hour-row { display: flex; align-items: center; gap: 0.5rem; }
 .settings-hour-row .zoom-slider { flex: 1; }
-.hint { font-size: 0.75rem; color: var(--color-text-muted); font-weight: 400; }
+.hint { font-size: 0.75rem; color: var(--color-text-muted); font-weight: 400; display: block; margin-top: 0.2rem; }
+
+/* ── CalDAV wizard calendar timezone field ───────────────────────────────────*/
+.cd-cal-tz { width: 140px; flex-shrink: 0; font-size: 0.75rem; }
 
 
 </style>
