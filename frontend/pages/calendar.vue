@@ -1,7 +1,7 @@
 <template>
   <div>
     <NuxtLayout name="authenticated">
-      <div class="calendar-page">
+      <div class="calendar-page" :style="{ '--event-font-size': calSettings.fontSize + 'px' }">
 
         <!-- ── Sidebar ─────────────────────────────────────────────────── -->
         <aside class="cal-sidebar">
@@ -10,11 +10,15 @@
           <div class="sidebar-section">
             <div class="sidebar-section-header">
               <h3>📅 My Calendars</h3>
+              <div class="sidebar-hdr-actions">
+                <button class="link-btn" @click="setAllCalendarsVisible(true)" title="Show all">✓All</button>
+                <button class="link-btn" @click="setAllCalendarsVisible(false)" title="Hide all">✗All</button>
+              </div>
             </div>
             <ul class="calendar-list">
               <li v-for="cal in calendars" :key="cal.id" class="calendar-item">
                 <label class="cal-item-label">
-                  <input type="checkbox" v-model="cal.visible" class="cal-check" :style="{ accentColor: cal.color }" />
+                  <input type="checkbox" v-model="cal.visible" @change="saveToStorage()" class="cal-check" :style="{ accentColor: cal.color }" />
                   <span class="cal-dot" :style="{ backgroundColor: cal.color }"></span>
                   <span class="cal-name">{{ cal.name }}</span>
                   <span v-if="cal.isSubscription" class="cal-badge" title="Subscribed">🔗</span>
@@ -37,9 +41,10 @@
               <button class="btn btn-outline btn-sm w-full" @click="openAddCalendarModal">＋ New Calendar</button>
               <button class="btn btn-outline btn-sm w-full" @click="openCalDAVModal">🌐 Subscribe (CalDAV)</button>
             </div>
+            <button v-if="recycledCalendars.length > 0" class="link-btn recycle-btn" @click="showRecycleBinModal = true">
+              🗑️ Recycle Bin ({{ recycledCalendars.length }})
+            </button>
           </div>
-
-          <!-- Visibility Toggles -->
           <div class="sidebar-section">
             <h3>👁️ Show in Events</h3>
             <div class="vis-list">
@@ -50,10 +55,28 @@
             </div>
           </div>
 
+          <!-- Zoom Level -->
+          <div class="sidebar-section">
+            <h3>🔍 Zoom</h3>
+            <div class="zoom-row">
+              <span class="zoom-label">−</span>
+              <input type="range" min="30" max="150" step="5" v-model.number="zoomLevel" class="zoom-slider" title="Vertical zoom (hour height)" />
+              <span class="zoom-label">＋</span>
+              <span class="zoom-value">{{ zoomLevel }}px</span>
+            </div>
+          </div>
+
           <!-- Import / Export -->
           <div class="sidebar-section">
-            <button class="btn btn-outline btn-sm w-full" @click="showImportExportModal = true">
+            <button class="btn btn-outline btn-sm w-full" @click="openImportExportModal">
               📁 Import / Export ICS
+            </button>
+          </div>
+
+          <!-- Settings -->
+          <div class="sidebar-section">
+            <button class="btn btn-outline btn-sm w-full" @click="showSettingsModal = true">
+              ⚙️ Settings
             </button>
           </div>
         </aside>
@@ -68,6 +91,7 @@
               <button class="btn btn-outline btn-sm" @click="goToToday">Today</button>
               <button class="btn btn-outline btn-sm" @click="navigate(1)">›</button>
               <h2 class="period-label">{{ currentPeriodLabel }}</h2>
+              <button class="btn btn-outline btn-sm date-picker-btn" @click="showDatePicker = !showDatePicker; datePickerMonth = new Date(currentDate)" title="Jump to date">📅</button>
             </div>
             <div class="cal-header-actions">
               <div class="view-switcher">
@@ -76,7 +100,7 @@
                 <button class="view-btn" :class="{ active: currentView === 'month' }" @click="currentView = 'month'">Month</button>
               </div>
               <button class="btn btn-primary btn-sm" @click="openAddEventModal()">＋ Event</button>
-              <button class="btn btn-outline btn-sm no-print" @click="printCalendar">🖨️ Print</button>
+              <button class="btn btn-outline btn-sm no-print" @click="openPrintModal">🖨️ Print</button>
             </div>
           </div>
 
@@ -104,8 +128,8 @@
                     :title="buildEventTooltip(evt)"
                   >
                     <span v-if="visibility.time && !evt.allDay" class="chip-time">{{ evt.startTime }}</span>
-                    <span v-if="visibility.title" class="chip-title">{{ evt.title }}</span>
-                    <span v-if="visibility.location && evt.location" class="chip-loc" title="Has location">📍</span>
+                    <span v-if="visibility.title" :class="['chip-title', { 'text-wrap': calSettings.textWrap }]">{{ evt.title }}</span>
+                    <span v-if="visibility.location && evt.location" class="chip-loc">📍{{ evt.location }}</span>
                     <span v-if="visibility.category && evt.category" class="chip-cat">· {{ evt.category }}</span>
                   </div>
                   <div
@@ -146,8 +170,8 @@
               </div>
             </div>
             <!-- Time grid -->
-            <div class="time-grid-scroll">
-              <div class="time-grid-inner">
+            <div class="time-grid-scroll" ref="timeGridScrollRef">
+              <div class="time-grid-inner" :style="{ '--hour-px': zoomLevel + 'px' }">
                 <div class="tg-gutter">
                   <div v-for="h in 24" :key="h" class="tg-hour-label">{{ formatHour(h - 1) }}</div>
                 </div>
@@ -163,12 +187,12 @@
                       v-for="evt in timedEventsForDate(day)"
                       :key="evt.id"
                       class="tg-event"
-                      :style="timedEventStyle(evt)"
+                      :style="timedEventStyleWithOverlap(evt, day)"
                       @click.stop="openEditEventModal(evt)"
                       :title="buildEventTooltip(evt)"
                     >
-                      <span v-if="visibility.title" class="tge-title">{{ evt.title }}</span>
-                      <span v-if="visibility.time" class="tge-time">{{ evt.startTime }}–{{ evt.endTime }}</span>
+                      <span v-if="visibility.title" :class="['tge-title', { 'text-wrap': calSettings.textWrap }]">{{ evt.title }}</span>
+                      <span v-if="visibility.time" class="tge-time">{{ formatEventTime(evt.startTime) }}–{{ formatEventTime(evt.endTime) }}</span>
                       <span v-if="visibility.location && evt.location" class="tge-loc">📍{{ evt.location }}</span>
                       <span v-if="visibility.category && evt.category" class="tge-cat">{{ evt.category }}</span>
                     </div>
@@ -178,7 +202,7 @@
             </div>
           </div>
 
-          <!-- ── Day View ────────────────────────────────────────────────── -->
+          <!-- ── Day View ───────────────────────────────────────────────── -->
           <div v-else-if="currentView === 'day'" class="time-view">
             <div class="time-view-header">
               <div class="tg-corner"></div>
@@ -199,8 +223,8 @@
                 >{{ evt.title }}</div>
               </div>
             </div>
-            <div class="time-grid-scroll">
-              <div class="time-grid-inner">
+            <div class="time-grid-scroll" ref="timeGridScrollRef">
+              <div class="time-grid-inner" :style="{ '--hour-px': zoomLevel + 'px' }">
                 <div class="tg-gutter">
                   <div v-for="h in 24" :key="h" class="tg-hour-label">{{ formatHour(h - 1) }}</div>
                 </div>
@@ -214,12 +238,12 @@
                       v-for="evt in timedEventsForDate(currentDate)"
                       :key="evt.id"
                       class="tg-event"
-                      :style="timedEventStyle(evt)"
+                      :style="timedEventStyleWithOverlap(evt, currentDate)"
                       @click.stop="openEditEventModal(evt)"
                       :title="buildEventTooltip(evt)"
                     >
-                      <span v-if="visibility.title" class="tge-title">{{ evt.title }}</span>
-                      <span v-if="visibility.time" class="tge-time">{{ evt.startTime }}–{{ evt.endTime }}</span>
+                      <span v-if="visibility.title" :class="['tge-title', { 'text-wrap': calSettings.textWrap }]">{{ evt.title }}</span>
+                      <span v-if="visibility.time" class="tge-time">{{ formatEventTime(evt.startTime) }}–{{ formatEventTime(evt.endTime) }}</span>
                       <span v-if="visibility.location && evt.location" class="tge-loc">📍{{ evt.location }}</span>
                       <span v-if="visibility.category && evt.category" class="tge-cat">{{ evt.category }}</span>
                     </div>
@@ -238,76 +262,167 @@
 
       <!-- Add / Edit Event -->
       <div v-if="showEventModal" class="modal-overlay" @click.self="showEventModal = false">
-        <div class="modal-content modal-lg">
+        <div class="modal-content modal-wide">
           <h3>{{ editingEvent ? '✏️ Edit Event' : '＋ New Event' }}</h3>
+          <div v-if="editingEvent?.readOnly" class="status-msg warn-msg">🔒 This event is from a read-only calendar and cannot be edited.</div>
 
-          <div class="form-grid">
+          <!-- Tabs -->
+          <div class="evt-tabs">
+            <button :class="['evt-tab', { active: evtTab === 'details' }]" @click="evtTab = 'details'">📋 Details</button>
+            <button :class="['evt-tab', { active: evtTab === 'recurrence' }]" @click="evtTab = 'recurrence'">🔁 Recurrence</button>
+            <button :class="['evt-tab', { active: evtTab === 'participation' }]" @click="evtTab = 'participation'">👥 Participation</button>
+            <button :class="['evt-tab', { active: evtTab === 'alarms' }]" @click="evtTab = 'alarms'">🔔 Alarms</button>
+          </div>
+
+          <!-- Tab: Details -->
+          <div v-show="evtTab === 'details'" class="form-grid">
             <div class="input-group full">
               <label>Title <span class="req">*</span></label>
-              <input v-model="evtForm.title" type="text" class="input" placeholder="Event title" />
+              <input v-model="evtForm.title" type="text" class="input" placeholder="Event title" :disabled="editingEvent?.readOnly" />
             </div>
-
             <div class="input-group">
               <label>Calendar</label>
-              <select v-model="evtForm.calendarId" class="select">
-                <option
-                  v-for="cal in editableCalendars"
-                  :key="cal.id"
-                  :value="cal.id"
-                >{{ cal.name }}</option>
+              <select v-model="evtForm.calendarId" class="select" :disabled="editingEvent?.readOnly">
+                <option v-for="cal in editableCalendars" :key="cal.id" :value="cal.id">{{ cal.name }}</option>
               </select>
             </div>
-
             <div class="input-group">
-              <label>Category</label>
-              <input v-model="evtForm.category" type="text" class="input" placeholder="e.g. Work, Personal" />
+              <label>Status</label>
+              <select v-model="evtForm.status" class="select" :disabled="editingEvent?.readOnly">
+                <option value="CONFIRMED">Confirmed</option>
+                <option value="TENTATIVE">Tentative</option>
+                <option value="CANCELLED">Cancelled</option>
+              </select>
             </div>
-
+            <div class="input-group">
+              <label>Class</label>
+              <select v-model="evtForm.klass" class="select" :disabled="editingEvent?.readOnly">
+                <option value="PUBLIC">Public</option>
+                <option value="PRIVATE">Private</option>
+                <option value="CONFIDENTIAL">Confidential</option>
+              </select>
+            </div>
+            <div class="input-group">
+              <label>Priority <span class="hint">(0=none, 1=high, 9=low)</span></label>
+              <input v-model.number="evtForm.priority" type="number" min="0" max="9" class="input" :disabled="editingEvent?.readOnly" />
+            </div>
             <div class="input-group full">
               <label class="checkbox-inline">
-                <input type="checkbox" v-model="evtForm.allDay" /> All Day Event
+                <input type="checkbox" v-model="evtForm.allDay" :disabled="editingEvent?.readOnly" /> All Day Event
               </label>
             </div>
-
             <div class="input-group">
               <label>Start Date</label>
-              <input v-model="evtForm.startDate" type="date" class="input" />
+              <input v-model="evtForm.startDate" type="date" class="input" :disabled="editingEvent?.readOnly" />
             </div>
             <div class="input-group" v-if="!evtForm.allDay">
               <label>Start Time</label>
-              <input v-model="evtForm.startTime" type="time" class="input" />
+              <input v-model="evtForm.startTime" type="time" class="input" :disabled="editingEvent?.readOnly" />
             </div>
-
             <div class="input-group">
               <label>End Date</label>
-              <input v-model="evtForm.endDate" type="date" class="input" />
+              <input v-model="evtForm.endDate" type="date" class="input" :disabled="editingEvent?.readOnly" />
             </div>
             <div class="input-group" v-if="!evtForm.allDay">
               <label>End Time</label>
-              <input v-model="evtForm.endTime" type="time" class="input" />
+              <input v-model="evtForm.endTime" type="time" class="input" :disabled="editingEvent?.readOnly" />
             </div>
-
             <div class="input-group full">
               <label>Location</label>
-              <input v-model="evtForm.location" type="text" class="input" placeholder="Location..." />
+              <input v-model="evtForm.location" type="text" class="input" placeholder="Location..." :disabled="editingEvent?.readOnly" />
             </div>
-
+            <div class="input-group full">
+              <label>Category</label>
+              <input v-model="evtForm.category" type="text" class="input" placeholder="e.g. Work, Personal" :disabled="editingEvent?.readOnly" />
+            </div>
             <div class="input-group full">
               <label>Description</label>
-              <textarea v-model="evtForm.description" class="input textarea" rows="3" placeholder="Description..."></textarea>
+              <textarea v-model="evtForm.description" class="input textarea" rows="3" placeholder="Description..." :disabled="editingEvent?.readOnly"></textarea>
             </div>
-
             <div class="input-group full">
               <label>Tags <span class="hint">(comma-separated)</span></label>
-              <input v-model="evtForm.tagsInput" type="text" class="input" placeholder="tag1, tag2, ..." />
+              <input v-model="evtForm.tagsInput" type="text" class="input" placeholder="tag1, tag2, ..." :disabled="editingEvent?.readOnly" />
+            </div>
+            <div class="input-group full">
+              <label>URL</label>
+              <input v-model="evtForm.url" type="url" class="input" placeholder="https://..." :disabled="editingEvent?.readOnly" />
+            </div>
+            <div class="input-group full">
+              <label>Attachments <span class="hint">(one URI per line)</span></label>
+              <textarea v-model="evtForm.attachInput" class="input textarea" rows="2" placeholder="https://file1.pdf&#10;https://file2.pdf" :disabled="editingEvent?.readOnly"></textarea>
+            </div>
+            <div class="input-group full">
+              <label>Related To <span class="hint">(UID of related event)</span></label>
+              <input v-model="evtForm.relatedTo" type="text" class="input" placeholder="event-uid..." :disabled="editingEvent?.readOnly" />
+            </div>
+          </div>
+
+          <!-- Tab: Recurrence -->
+          <div v-show="evtTab === 'recurrence'" class="form-grid">
+            <div class="input-group full">
+              <label>RRULE <span class="hint">(RFC 5545, e.g. FREQ=WEEKLY;BYDAY=MO,WE,FR)</span></label>
+              <input v-model="evtForm.rrule" type="text" class="input" placeholder="FREQ=WEEKLY;BYDAY=MO" :disabled="editingEvent?.readOnly" />
+            </div>
+            <div class="input-group full">
+              <label>RDATE <span class="hint">(one value per line, e.g. 20240301T100000Z)</span></label>
+              <textarea v-model="evtForm.rdateInput" class="input textarea" rows="3" placeholder="20240301T100000Z" :disabled="editingEvent?.readOnly"></textarea>
+            </div>
+            <div class="input-group full">
+              <label>EXDATE <span class="hint">(exception dates, one per line)</span></label>
+              <textarea v-model="evtForm.exdateInput" class="input textarea" rows="3" placeholder="20240308T100000Z" :disabled="editingEvent?.readOnly"></textarea>
+            </div>
+          </div>
+
+          <!-- Tab: Participation -->
+          <div v-show="evtTab === 'participation'" class="form-grid">
+            <div class="input-group full">
+              <label>Transparency</label>
+              <select v-model="evtForm.transp" class="select" :disabled="editingEvent?.readOnly">
+                <option value="OPAQUE">Opaque (shows as busy)</option>
+                <option value="TRANSPARENT">Transparent (free)</option>
+              </select>
+            </div>
+            <div class="input-group full">
+              <label>Organizer <span class="hint">(e.g. CN=Name:mailto:email@example.com)</span></label>
+              <input v-model="evtForm.organizer" type="text" class="input" placeholder="CN=John:mailto:john@example.com" :disabled="editingEvent?.readOnly" />
+            </div>
+            <div class="input-group full">
+              <label>Contact</label>
+              <input v-model="evtForm.contact" type="text" class="input" placeholder="Contact name or email" :disabled="editingEvent?.readOnly" />
+            </div>
+            <div class="input-group full">
+              <label>Attendees <span class="hint">(one per line, e.g. CN=Name:mailto:email@example.com)</span></label>
+              <textarea v-model="evtForm.attendeesInput" class="input textarea" rows="5" placeholder="CN=Alice:mailto:alice@example.com&#10;CN=Bob:mailto:bob@example.com" :disabled="editingEvent?.readOnly"></textarea>
+            </div>
+          </div>
+
+          <!-- Tab: Alarms (VALARM) -->
+          <div v-show="evtTab === 'alarms'" class="form-grid">
+            <div class="input-group full">
+              <label>Trigger <span class="hint">(e.g. -PT15M = 15 min before, PT0S = at start)</span></label>
+              <input v-model="evtForm.alarmTrigger" type="text" class="input" placeholder="-PT15M" :disabled="editingEvent?.readOnly" />
+            </div>
+            <div class="input-group full">
+              <label>Action</label>
+              <select v-model="evtForm.alarmAction" class="select" :disabled="editingEvent?.readOnly">
+                <option value="DISPLAY">Display</option>
+                <option value="EMAIL">Email</option>
+                <option value="AUDIO">Audio</option>
+              </select>
+            </div>
+            <div class="input-group full">
+              <label>Alarm Description</label>
+              <textarea v-model="evtForm.alarmDescription" class="input textarea" rows="2" placeholder="Reminder description..." :disabled="editingEvent?.readOnly"></textarea>
             </div>
           </div>
 
           <div class="modal-buttons">
-            <button v-if="editingEvent" class="btn btn-outline danger-btn" @click="deleteCurrentEvent">🗑️ Delete</button>
+            <button v-if="editingEvent" class="btn btn-outline btn-sm" @click="exportSingleEventICS" title="Export as .ics">📥 .ics</button>
+            <button v-if="editingEvent" class="btn btn-outline btn-sm" @click="openRawIcsModal" title="View/edit as raw ICS">📋 Raw</button>
+            <button v-if="editingEvent && !editingEvent.readOnly" class="btn btn-outline danger-btn" @click="deleteCurrentEvent">🗑️ Delete</button>
             <span class="btn-spacer"></span>
-            <button class="btn btn-outline" @click="showEventModal = false">Cancel</button>
-            <button class="btn btn-primary" @click="saveEvent">{{ editingEvent ? 'Update' : 'Add Event' }}</button>
+            <button class="btn btn-outline" @click="showEventModal = false">Close</button>
+            <button v-if="!editingEvent?.readOnly" class="btn btn-primary" @click="saveEvent">{{ editingEvent ? 'Update' : 'Add Event' }}</button>
           </div>
         </div>
       </div>
@@ -324,6 +439,30 @@
             <label>Color</label>
             <input v-model="calForm.color" type="color" class="input color-input" />
           </div>
+          <div class="input-group">
+            <label>Timezone</label>
+            <input v-model="calForm.timezone" type="text" class="input" list="tz-list" placeholder="e.g. Europe/Paris" />
+          </div>
+          <template v-if="editingCalendar?.isSubscription">
+            <div class="input-group">
+              <label>URL</label>
+              <input v-model="calForm.url" type="url" class="input" placeholder="https://example.com/calendar.ics" />
+            </div>
+            <div class="input-group">
+              <label>Username <span class="hint">(optional)</span></label>
+              <input v-model="calForm.username" type="text" class="input" placeholder="username" autocomplete="username" />
+            </div>
+            <div class="input-group">
+              <label>Password <span class="hint">(optional)</span></label>
+              <input v-model="calForm.password" type="password" class="input" placeholder="password" autocomplete="current-password" />
+            </div>
+            <div class="input-group">
+              <label class="checkbox-inline">
+                <input type="checkbox" v-model="calForm.editable" />
+                Allow editing &amp; syncing (CalDAV write)
+              </label>
+            </div>
+          </template>
           <div class="modal-buttons">
             <button class="btn btn-outline" @click="showCalendarModal = false">Cancel</button>
             <button class="btn btn-primary" @click="saveCalendar">{{ editingCalendar ? 'Update' : 'Create' }}</button>
@@ -331,45 +470,98 @@
         </div>
       </div>
 
-      <!-- CalDAV Subscription -->
+      <!-- CalDAV Subscription Wizard -->
       <div v-if="showCalDAVModal" class="modal-overlay" @click.self="showCalDAVModal = false">
-        <div class="modal-content">
-          <h3>🌐 CalDAV / ICS Subscription</h3>
-          <p class="modal-hint">Subscribe to a CalDAV calendar or ICS feed URL.</p>
-          <div class="input-group">
-            <label>Calendar Name <span class="req">*</span></label>
-            <input v-model="cdForm.name" type="text" class="input" placeholder="e.g. Work Calendar" />
+        <div class="modal-content modal-wide">
+          <h3>🌐 Subscribe to CalDAV Calendars</h3>
+
+          <!-- Step indicator -->
+          <div class="wizard-steps">
+            <span :class="['wizard-step', { active: cdStep === 1, done: cdStep > 1 }]">1. Connection</span>
+            <span class="wizard-sep">›</span>
+            <span :class="['wizard-step', { active: cdStep === 2, done: cdStep > 2 }]">2. Choose Calendars</span>
+            <span class="wizard-sep">›</span>
+            <span :class="['wizard-step', { active: cdStep === 3 }]">3. Confirm</span>
           </div>
-          <div class="input-group">
-            <label>URL <span class="req">*</span></label>
-            <input v-model="cdForm.url" type="url" class="input" placeholder="https://example.com/calendar.ics" />
-          </div>
-          <div class="input-group">
-            <label>Color</label>
-            <input v-model="cdForm.color" type="color" class="input color-input" />
-          </div>
-          <div class="input-group">
-            <label>Username <span class="hint">(optional)</span></label>
-            <input v-model="cdForm.username" type="text" class="input" placeholder="username" autocomplete="username" />
-          </div>
-          <div class="input-group">
-            <label>Password <span class="hint">(optional)</span></label>
-            <input v-model="cdForm.password" type="password" class="input" placeholder="password" autocomplete="current-password" />
-          </div>
-          <p class="modal-hint warn-hint">⚠️ Credentials are stored in browser localStorage. Do not use sensitive passwords on shared devices.</p>
-          <div class="input-group">
-            <label class="checkbox-inline">
-              <input type="checkbox" v-model="cdForm.editable" />
-              Allow editing &amp; syncing (CalDAV write)
-            </label>
-          </div>
-          <div v-if="cdError" class="status-msg error">{{ cdError }}</div>
-          <div class="modal-buttons">
-            <button class="btn btn-outline" @click="showCalDAVModal = false">Cancel</button>
-            <button class="btn btn-primary" @click="subscribeCalDAV" :disabled="isCdLoading">
-              {{ isCdLoading ? '⏳ Fetching…' : '🔗 Subscribe' }}
-            </button>
-          </div>
+
+          <!-- Step 1: credentials -->
+          <template v-if="cdStep === 1">
+            <p class="modal-hint">Enter your CalDAV server address and optional credentials.</p>
+            <div class="input-group">
+              <label>Server URL <span class="req">*</span></label>
+              <input v-model="cdCreds.url" type="url" class="input" placeholder="https://example.com/remote.php/dav" />
+            </div>
+            <div class="input-group">
+              <label>Username <span class="hint">(optional)</span></label>
+              <input v-model="cdCreds.username" type="text" class="input" placeholder="username" autocomplete="username" />
+            </div>
+            <div class="input-group">
+              <label>Password <span class="hint">(optional)</span></label>
+              <input v-model="cdCreds.password" type="password" class="input" placeholder="password" autocomplete="current-password" />
+            </div>
+            <p class="modal-hint warn-hint">⚠️ Credentials are stored in browser localStorage. Avoid using on shared devices.</p>
+            <div v-if="cdError" class="status-msg error">{{ cdError }}</div>
+            <div class="modal-buttons">
+              <button class="btn btn-outline" @click="showCalDAVModal = false">Cancel</button>
+              <button class="btn btn-primary" @click="discoverCalendars" :disabled="isCdLoading">
+                {{ isCdLoading ? '⏳ Discovering…' : '🔍 Discover Calendars' }}
+              </button>
+            </div>
+          </template>
+
+          <!-- Step 2: choose calendars -->
+          <template v-if="cdStep === 2">
+            <p class="modal-hint">Select which calendars to import, rename them, and assign colours.</p>
+            <div v-if="cdSelected.length === 0" class="status-msg warn-msg">No calendars found. You can go back and check the URL.</div>
+            <div v-else class="cd-selall-row">
+              <button class="link-btn" @click="cdSelected.forEach(c => c.included = true)">✓ Select All</button>
+              <button class="link-btn" @click="cdSelected.forEach(c => c.included = false)">✗ Deselect All</button>
+            </div>
+            <div class="cd-calendar-list">
+              <div v-for="(cal, i) in cdSelected" :key="cal.href" class="cd-calendar-row">
+                <label class="cd-cal-check">
+                  <input type="checkbox" v-model="cal.included" />
+                </label>
+                <input type="color" v-model="cal.color" class="color-picker-inline" :disabled="!cal.included" />
+                <input v-model="cal.name" type="text" class="input cd-cal-name" :disabled="!cal.included" :placeholder="'Calendar ' + (i + 1)" />
+                <input v-model="cal.timezone" type="text" class="input cd-cal-tz" list="tz-list" :disabled="!cal.included" :placeholder="calSettings.myTimezone" />
+                <label :class="['cd-mode-label', { 'cd-mode-disabled': !cal.included }]">
+                  <input type="checkbox" v-model="cal.editable" :disabled="!cal.included" />
+                  Editable
+                </label>
+              </div>
+            </div>
+            <div v-if="cdError" class="status-msg error">{{ cdError }}</div>
+            <div class="modal-buttons">
+              <button class="btn btn-outline" @click="cdStep = 1">‹ Back</button>
+              <div class="btn-spacer"></div>
+              <button class="btn btn-outline" @click="showCalDAVModal = false">Cancel</button>
+              <button class="btn btn-primary" @click="cdGoToSummary" :disabled="!cdSelected.some(c => c.included)">Next ›</button>
+            </div>
+          </template>
+
+          <!-- Step 3: summary & confirm -->
+          <template v-if="cdStep === 3">
+            <p class="modal-hint">Review the calendars to be subscribed, then confirm.</p>
+            <div class="cd-summary-list">
+              <div v-for="cal in cdSelected.filter(c => c.included)" :key="cal.href" class="cd-summary-row">
+                <span class="cal-dot" :style="{ backgroundColor: cal.color }"></span>
+                <span class="cd-sum-name">{{ cal.name }}</span>
+                <span class="cd-sum-badge">{{ cal.editable ? '✏️ Editable' : '👁️ Read-only' }}</span>
+                <span class="cd-sum-badge">🕐 {{ cal.timezone }}</span>
+              </div>
+            </div>
+            <div v-if="cdError" class="status-msg error">{{ cdError }}</div>
+            <div class="modal-buttons">
+              <button class="btn btn-outline" @click="cdStep = 2">‹ Back</button>
+              <div class="btn-spacer"></div>
+              <button class="btn btn-outline" @click="showCalDAVModal = false">Cancel</button>
+              <button class="btn btn-primary" @click="subscribeAllCalDAV" :disabled="isCdLoading">
+                {{ isCdLoading ? '⏳ Subscribing…' : '🔗 Subscribe' }}
+              </button>
+            </div>
+          </template>
+
         </div>
       </div>
 
@@ -380,14 +572,24 @@
 
           <div class="ie-section">
             <h4>📤 Export</h4>
-            <div class="input-group">
-              <label>Calendar</label>
-              <select v-model="exportCalId" class="select">
-                <option value="all">All Calendars</option>
-                <option v-for="cal in calendars" :key="cal.id" :value="cal.id">{{ cal.name }}</option>
-              </select>
+            <div class="ie-export-header">
+              <label class="checkbox-inline">
+                <input type="checkbox"
+                  :checked="exportSelectedIds.length === calendars.length && calendars.length > 0"
+                  :indeterminate="exportSelectedIds.length > 0 && exportSelectedIds.length < calendars.length"
+                  @change="(e) => { const t = e.target as HTMLInputElement; exportSelectedIds = t.checked ? calendars.map(c => c.id) : []; }"
+                />
+                <strong>All Calendars</strong>
+              </label>
             </div>
-            <button class="btn btn-outline" @click="exportICS">📄 Download ICS</button>
+            <div class="ie-export-cals">
+              <label v-for="cal in calendars" :key="cal.id" class="checkbox-inline ie-cal-opt">
+                <input type="checkbox" :value="cal.id" v-model="exportSelectedIds" />
+                <span class="cal-dot" :style="{ backgroundColor: cal.color }"></span>
+                {{ cal.name }}
+              </label>
+            </div>
+            <button class="btn btn-outline" @click="exportICS" :disabled="exportSelectedIds.length === 0">📄 Download ICS</button>
           </div>
 
           <div class="ie-section">
@@ -411,12 +613,189 @@
         </div>
       </div>
 
+      <!-- Print / PDF Export -->
+      <div v-if="showPrintModal" class="modal-overlay" @click.self="showPrintModal = false">
+        <div class="modal-content">
+          <h3>🖨️ Print / Export PDF</h3>
+          <div class="form-grid">
+            <div class="input-group">
+              <label>Start Date <span class="req">*</span></label>
+              <input v-model="printForm.startDate" type="date" class="input" />
+            </div>
+            <div class="input-group">
+              <label>End Date <span class="req">*</span></label>
+              <input v-model="printForm.endDate" type="date" class="input" />
+            </div>
+          </div>
+          <div class="input-group">
+            <label>Layout</label>
+            <div class="view-switcher">
+              <button class="view-btn" :class="{ active: printForm.viewMode === 'day' }" @click="printForm.viewMode = 'day'">1 Day / Page</button>
+              <button class="view-btn" :class="{ active: printForm.viewMode === 'week' }" @click="printForm.viewMode = 'week'">1 Week / Page</button>
+              <button class="view-btn" :class="{ active: printForm.viewMode === 'month' }" @click="printForm.viewMode = 'month'">1 Month / Page</button>
+            </div>
+          </div>
+          <div class="input-group">
+            <label>Event Information</label>
+            <div class="view-switcher">
+              <button class="view-btn" :class="{ active: printForm.infoLevel === 'full' }" @click="printForm.infoLevel = 'full'">Full Details</button>
+              <button class="view-btn" :class="{ active: printForm.infoLevel === 'title-time' }" @click="printForm.infoLevel = 'title-time'">Title &amp; Time</button>
+              <button class="view-btn" :class="{ active: printForm.infoLevel === 'availability' }" @click="printForm.infoLevel = 'availability'">Availability Only</button>
+            </div>
+            <p class="modal-hint" style="margin-top:0.3rem">Availability Only shows coloured blocks — useful for sharing your schedule without details.</p>
+          </div>
+          <div v-if="printError" class="status-msg error">{{ printError }}</div>
+          <div class="modal-buttons">
+            <button class="btn btn-outline" @click="showPrintModal = false">Cancel</button>
+            <button class="btn btn-primary" @click="exportPDF" :disabled="isPrinting">
+              {{ isPrinting ? '⏳ Generating…' : '📄 Export PDF' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings -->
+      <div v-if="showSettingsModal" class="modal-overlay" @click.self="showSettingsModal = false">
+        <div class="modal-content">
+          <h3>⚙️ Settings</h3>
+
+          <div class="input-group">
+            <label>My Timezone</label>
+            <input v-model="calSettings.myTimezone" type="text" class="input" list="tz-list" placeholder="e.g. Europe/Paris" />
+            <span class="hint">Times from other timezones are converted to this timezone for display.</span>
+          </div>
+
+          <div class="input-group">
+            <label>Default view on open</label>
+            <div class="view-switcher">
+              <button class="view-btn" :class="{ active: calSettings.defaultView === 'day' }" @click="calSettings.defaultView = 'day'">Day</button>
+              <button class="view-btn" :class="{ active: calSettings.defaultView === 'week' }" @click="calSettings.defaultView = 'week'">Week</button>
+              <button class="view-btn" :class="{ active: calSettings.defaultView === 'month' }" @click="calSettings.defaultView = 'month'">Month</button>
+            </div>
+          </div>
+
+          <div class="input-group">
+            <label>Default start hour <span class="hint">(day &amp; week view)</span></label>
+            <div class="settings-hour-row">
+              <input type="range" min="0" max="23" step="1" v-model.number="calSettings.startHour" class="zoom-slider" />
+              <span class="zoom-value">{{ formatHour(calSettings.startHour) }}</span>
+            </div>
+          </div>
+
+          <div class="input-group">
+            <label class="checkbox-inline">
+              <input type="checkbox" v-model="calSettings.textWrap" />
+              Wrap long text in event tiles
+            </label>
+          </div>
+
+          <div class="input-group">
+            <label>Event font size</label>
+            <div class="settings-hour-row">
+              <input type="range" min="10" max="16" step="1" v-model.number="calSettings.fontSize" class="zoom-slider" />
+              <span class="zoom-value">{{ calSettings.fontSize }}px</span>
+            </div>
+          </div>
+          <div class="input-group">
+            <label>Time display style</label>
+            <div class="view-switcher">
+              <button class="view-btn" :class="{ active: calSettings.timeStyle === 'classic' }" @click="calSettings.timeStyle = 'classic'">12h</button>
+              <button class="view-btn" :class="{ active: calSettings.timeStyle === 'iso' }" @click="calSettings.timeStyle = 'iso'">24h</button>
+              <button class="view-btn" :class="{ active: calSettings.timeStyle === 'military' }" @click="calSettings.timeStyle = 'military'">Military</button>
+            </div>
+          </div>
+          <div class="input-group">
+            <label>Recycle bin auto-delete <span class="hint">(0 = never)</span></label>
+            <div class="settings-hour-row">
+              <input type="range" min="0" max="365" step="1" v-model.number="calSettings.recycleBinDays" class="zoom-slider" />
+              <span class="zoom-value">{{ calSettings.recycleBinDays === 0 ? '∞' : calSettings.recycleBinDays + 'd' }}</span>
+            </div>
+          </div>
+
+          <div class="modal-buttons">
+            <span class="btn-spacer"></span>
+            <button class="btn btn-outline" @click="showSettingsModal = false">Close</button>
+            <button class="btn btn-primary" @click="saveSettings">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Raw ICS view/edit -->
+      <div v-if="showRawIcsModal" class="modal-overlay" @click.self="showRawIcsModal = false">
+        <div class="modal-content modal-lg">
+          <h3>📋 Raw ICS</h3>
+          <p class="modal-hint">View or edit the raw iCalendar data for this event. Changes are applied to the form on "Apply".</p>
+          <textarea v-model="rawIcsContent" class="input textarea ics-textarea" rows="20" spellcheck="false"></textarea>
+          <div class="modal-buttons">
+            <button class="btn btn-outline" @click="showRawIcsModal = false">Close</button>
+            <button v-if="!editingEvent?.readOnly" class="btn btn-primary" @click="applyRawIcs">Apply</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recycle Bin -->
+      <div v-if="showRecycleBinModal" class="modal-overlay" @click.self="showRecycleBinModal = false">
+        <div class="modal-content">
+          <h3>🗑️ Recycle Bin</h3>
+          <p class="modal-hint">Calendars here are automatically deleted after {{ calSettings.recycleBinDays === 0 ? 'never (disabled)' : calSettings.recycleBinDays + ' days' }}.</p>
+          <div v-if="recycledCalendars.length === 0" class="status-msg">Recycle bin is empty.</div>
+          <div v-else class="recycle-list">
+            <div v-for="entry in recycledCalendars" :key="entry.calendar.id" class="recycle-row">
+              <span class="cal-dot" :style="{ backgroundColor: entry.calendar.color }"></span>
+              <span class="recycle-name">{{ entry.calendar.name }}</span>
+              <span class="recycle-meta">{{ entry.events.length }} event{{ entry.events.length !== 1 ? 's' : '' }}</span>
+              <span class="recycle-age">{{ recycleDaysAgo(entry.deletedAt) }}</span>
+              <button class="btn btn-outline btn-sm" @click="restoreCalendar(entry)">↩ Restore</button>
+              <button class="btn btn-outline btn-sm danger-btn" @click="permanentlyDeleteCalendar(entry)">✕ Delete</button>
+            </div>
+          </div>
+          <div class="modal-buttons">
+            <span class="btn-spacer"></span>
+            <button class="btn btn-outline" @click="showRecycleBinModal = false">Close</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Date Picker Popup -->
+      <div v-if="showDatePicker" class="date-picker-overlay" @click.self="showDatePicker = false">
+        <div class="date-picker-popup">
+          <div class="dp-header">
+            <button class="icon-btn" @click="datePickerMonth = new Date(datePickerMonth.getFullYear(), datePickerMonth.getMonth() - 1, 1)">‹</button>
+            <span class="dp-title">{{ datePickerMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) }}</span>
+            <button class="icon-btn" @click="datePickerMonth = new Date(datePickerMonth.getFullYear(), datePickerMonth.getMonth() + 1, 1)">›</button>
+          </div>
+          <div class="dp-weekdays">
+            <span v-for="d in weekdayNames" :key="d">{{ d.slice(0,1) }}</span>
+          </div>
+          <div class="dp-grid">
+            <div
+              v-for="(cell, i) in datePickerCells"
+              :key="i"
+              :class="['dp-cell', { 'dp-today': cell.isToday, 'dp-selected': cell.isCurrent, 'dp-other': cell.date.getMonth() !== datePickerMonth.getMonth() }]"
+              @click="selectDatePickerDate(cell.date)"
+            >
+              <span class="dp-num">{{ cell.date.getDate() }}</span>
+              <div class="dp-dots">
+                <span v-for="(color, ci) in eventDotsForDate(cell.date)" :key="ci" class="dp-dot" :style="{ backgroundColor: color }"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Timezone datalist for autocomplete -->
+      <datalist id="tz-list">
+        <option v-for="label in ianaTimezonesWithOffset" :key="label" :value="label" />
+      </datalist>
+
     </NuxtLayout>
   </div>
 </template>
 
 <script setup lang="ts">
+import { jsPDF } from 'jspdf';
 import { useAuthStore } from '~/stores/auth';
+const { formatDatetime } = useDatetime();
 
 definePageMeta({ ssr: false });
 
@@ -432,6 +811,7 @@ interface Calendar {
   username?: string;
   password?: string;
   editable?: boolean;
+  timezone?: string;  // IANA timezone, e.g. 'America/New_York'
 }
 
 interface CalEvent {
@@ -450,6 +830,23 @@ interface CalEvent {
   tags: string[];
   caldavUrl?: string;
   readOnly?: boolean;
+  // Extended CalDAV fields
+  status?: string;          // CONFIRMED | TENTATIVE | CANCELLED
+  klass?: string;           // PUBLIC | PRIVATE | CONFIDENTIAL
+  priority?: number;        // 0-9
+  url?: string;
+  attachUris?: string[];
+  relatedTo?: string;
+  rrule?: string;
+  rdates?: string[];
+  exdates?: string[];
+  transp?: string;          // OPAQUE | TRANSPARENT
+  organizer?: string;
+  contact?: string;
+  attendees?: string[];
+  alarmTrigger?: string;    // e.g. -PT15M
+  alarmAction?: string;     // DISPLAY | EMAIL | AUDIO
+  alarmDescription?: string;
 }
 
 interface ParsedICSEvent {
@@ -465,6 +862,29 @@ interface ParsedICSEvent {
   endTime?: string;
   allDay?: boolean;
   caldavUrl?: string;
+  sourceTzid?: string;  // original TZID from ICS
+  status?: string;
+  klass?: string;
+  priority?: number;
+  url?: string;
+  attachUris?: string[];
+  relatedTo?: string;
+  rrule?: string;
+  rdates?: string[];
+  exdates?: string[];
+  transp?: string;
+  organizer?: string;
+  contact?: string;
+  attendees?: string[];
+  alarmTrigger?: string;
+  alarmAction?: string;
+  alarmDescription?: string;
+}
+
+interface RecycleBinEntry {
+  calendar: Calendar;
+  events: CalEvent[];
+  deletedAt: string; // ISO datetime string
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -479,12 +899,20 @@ const calendars = ref<Calendar[]>([]);
 const events = ref<CalEvent[]>([]);
 
 const visibility = ref({ title: true, time: true, location: false, category: false });
+watch(visibility, () => saveToStorage(), { deep: true });
 
 // ─── Modal state ──────────────────────────────────────────────────────────────
 const showEventModal = ref(false);
 const showCalendarModal = ref(false);
 const showCalDAVModal = ref(false);
 const showImportExportModal = ref(false);
+const showRawIcsModal = ref(false);
+const rawIcsContent = ref('');
+
+const recycledCalendars = ref<RecycleBinEntry[]>([]);
+const showRecycleBinModal = ref(false);
+const showDatePicker = ref(false);
+const datePickerMonth = ref(new Date());
 
 const editingEvent = ref<CalEvent | null>(null);
 const editingCalendar = ref<Calendar | null>(null);
@@ -494,25 +922,75 @@ const evtForm = ref({
   title: '', description: '', startDate: '', startTime: '09:00',
   endDate: '', endTime: '10:00', allDay: false,
   location: '', category: '', tagsInput: '', calendarId: '',
+  // Extended CalDAV fields
+  status: 'CONFIRMED', klass: 'PUBLIC', priority: 0, url: '',
+  attachInput: '', relatedTo: '', rrule: '',
+  rdateInput: '', exdateInput: '', transp: 'OPAQUE',
+  organizer: '', contact: '', attendeesInput: '',
+  alarmTrigger: '', alarmAction: 'DISPLAY', alarmDescription: '',
 });
 
-// ─── Calendar form ────────────────────────────────────────────────────────────
-const calForm = ref({ name: '', color: '#3b82f6' });
+const evtTab = ref<'details' | 'recurrence' | 'participation' | 'alarms'>('details');
 
-// ─── CalDAV form ──────────────────────────────────────────────────────────────
-const cdForm = ref({ name: '', url: '', color: '#8b5cf6', username: '', password: '', editable: false });
-const cdError = ref('');
+// ─── Calendar form ────────────────────────────────────────────────────────────
+const calForm = ref({ name: '', color: '#3b82f6', url: '', username: '', password: '', editable: false, timezone: '' });
+
+// ─── CalDAV wizard ────────────────────────────────────────────────────────────
+const RAINBOW = ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#8b5cf6','#ec4899'];
+
+interface CdCalendarEntry { href: string; name: string; color: string; editable: boolean; included: boolean; timezone: string; }
+
+const cdStep   = ref<1 | 2 | 3>(1);
+const cdCreds  = ref({ url: '', username: '', password: '' });
+const cdSelected = ref<CdCalendarEntry[]>([]);
+const cdError  = ref('');
 const isCdLoading = ref(false);
 
+// ─── Print state ──────────────────────────────────────────────────────────────
+const showPrintModal = ref(false);
+const printForm = ref<{ startDate: string; endDate: string; viewMode: 'day' | 'week' | 'month'; infoLevel: 'full' | 'title-time' | 'availability' }>({
+  startDate: '', endDate: '', viewMode: 'month', infoLevel: 'full',
+});
+const printError = ref('');
+const isPrinting = ref(false);
+
 // ─── Import/Export state ──────────────────────────────────────────────────────
-const exportCalId = ref('all');
+const exportSelectedIds = ref<string[]>([]);
 const importCalId = ref('');
 const importMsg = ref('');
 const importMsgType = ref<'success' | 'error'>('success');
 
+function openImportExportModal() {
+  exportSelectedIds.value = calendars.value.map(c => c.id);
+  importMsg.value = '';
+  showImportExportModal.value = true;
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 const weekdayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const HOUR_PX = 60; // pixel height per hour in time grids
+
+// ─── Zoom & Settings state ────────────────────────────────────────────────────
+const zoomLevel = ref(60); // px per hour in time-grid
+
+interface CalSettings {
+  defaultView: 'day' | 'week' | 'month';
+  startHour: number;
+  textWrap: boolean;
+  myTimezone: string;
+  fontSize: number;            // 10–16, default 12
+  timeStyle: 'classic' | 'iso' | 'military';  // default 'classic'
+  recycleBinDays: number;      // 0 = never auto-delete, default 30
+}
+const calSettings = ref<CalSettings>({
+  defaultView: 'week',
+  startHour: 8,
+  textWrap: false,
+  myTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  fontSize: 12,
+  timeStyle: 'classic',
+  recycleBinDays: 30,
+});
+const showSettingsModal = ref(false);
 
 // ─── Computed ─────────────────────────────────────────────────────────────────
 
@@ -564,6 +1042,28 @@ const weekDays = computed(() => {
   return Array.from({ length: 7 }, (_, i) => { const d = new Date(s); d.setDate(d.getDate() + i); return d; });
 });
 
+const datePickerCells = computed(() => {
+  const y = datePickerMonth.value.getFullYear();
+  const m = datePickerMonth.value.getMonth();
+  const first = new Date(y, m, 1);
+  const last  = new Date(y, m + 1, 0);
+  const todayStr = dateStr(new Date());
+  let startDow = first.getDay() - 1;
+  if (startDow < 0) startDow = 6;
+  const cells: { date: Date; isToday: boolean; isCurrent: boolean }[] = [];
+  for (let i = startDow - 1; i >= 0; i--) cells.push({ date: new Date(y, m, -i), isToday: false, isCurrent: false });
+  for (let d = 1; d <= last.getDate(); d++) {
+    const date = new Date(y, m, d);
+    cells.push({ date, isToday: dateStr(date) === todayStr, isCurrent: dateStr(date) === dateStr(currentDate.value) });
+  }
+  while (cells.length < 42) {
+    const prev = cells[cells.length - 1].date;
+    const date = new Date(prev); date.setDate(date.getDate() + 1);
+    cells.push({ date, isToday: false, isCurrent: false });
+  }
+  return cells;
+});
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function dateStr(d: Date): string {
@@ -590,6 +1090,19 @@ function formatHour(h: number): string {
   return h < 12 ? `${h} AM` : `${h - 12} PM`;
 }
 
+function formatEventTime(t: string): string {
+  if (!t) return '';
+  const [hStr, mStr] = t.split(':');
+  const h = parseInt(hStr), m = parseInt(mStr);
+  const style = calSettings.value.timeStyle;
+  if (style === 'iso') return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  if (style === 'military') return `${String(h).padStart(2,'0')}${String(m).padStart(2,'0')}`;
+  // classic 12h
+  const period = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return m === 0 ? `${h12} ${period}` : `${h12}:${String(m).padStart(2,'0')} ${period}`;
+}
+
 function formatDayName(d: Date): string {
   return d.toLocaleDateString('en-US', { weekday: 'short' });
 }
@@ -598,7 +1111,7 @@ function buildEventTooltip(evt: CalEvent): string {
   const parts = [evt.title];
   if (evt.location) parts.push('📍' + evt.location);
   if (evt.category) parts.push(evt.category);
-  if (!evt.allDay) parts.push(`${evt.startTime}–${evt.endTime}`);
+  if (!evt.allDay) parts.push(`${formatEventTime(evt.startTime)}–${formatEventTime(evt.endTime)}`);
   return parts.join(' · ');
 }
 
@@ -611,11 +1124,16 @@ function getRandomColor(): string {
 
 function visibleEventsForDate(date: Date): CalEvent[] {
   const ds = dateStr(date);
-  return events.value.filter(evt => {
-    const cal = calendars.value.find(c => c.id === evt.calendarId);
-    if (!cal?.visible) return false;
-    return evt.startDate <= ds && evt.endDate >= ds;
-  });
+  return events.value
+    .filter(evt => {
+      const cal = calendars.value.find(c => c.id === evt.calendarId);
+      if (!cal?.visible) return false;
+      return evt.startDate <= ds && evt.endDate >= ds;
+    })
+    .sort((a, b) => {
+      if (a.allDay !== b.allDay) return a.allDay ? -1 : 1;
+      return a.startTime.localeCompare(b.startTime);
+    });
 }
 
 function allDayEventsForDate(date: Date): CalEvent[] {
@@ -626,19 +1144,126 @@ function timedEventsForDate(date: Date): CalEvent[] {
   return visibleEventsForDate(date).filter(e => !e.allDay);
 }
 
-function timedEventStyle(evt: CalEvent): Record<string, string> {
-  const [sh, sm] = evt.startTime.split(':').map(Number);
-  const [eh, em] = evt.endTime.split(':').map(Number);
-  const top = (sh * 60 + sm) * (HOUR_PX / 60);
+function eventDotsForDate(d: Date): string[] {
+  const ds = dateStr(d);
+  const seen = new Set<string>();
+  const colors: string[] = [];
+  for (const e of events.value) {
+    const cal = calendars.value.find(c => c.id === e.calendarId);
+    if (!cal?.visible) continue;
+    if (e.startDate <= ds && e.endDate >= ds) {
+      if (!seen.has(cal.color)) { seen.add(cal.color); colors.push(cal.color); }
+    }
+  }
+  return colors.slice(0, 4);
+}
+
+function selectDatePickerDate(d: Date) {
+  currentDate.value = new Date(d);
+  showDatePicker.value = false;
+  datePickerMonth.value = new Date(d);
+}
+
+// ─── Overlap layout ───────────────────────────────────────────────────────────
+interface OverlapInfo { col: number; total: number; }
+
+function timeToMin(t: string): number {
+  const [h, m] = (t || '00:00').split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+
+function computeOverlapLayout(evts: CalEvent[], day: Date): Map<string, OverlapInfo> {
+  const result = new Map<string, OverlapInfo>();
+  if (!evts.length) return result;
+  const ds = dateStr(day);
+
+  interface Item { id: string; start: number; end: number; }
+  const items: Item[] = evts.map(evt => {
+    const effStart = evt.startDate < ds ? 0 : timeToMin(evt.startTime);
+    const effEnd = evt.endDate > ds ? 24 * 60 : timeToMin(evt.endTime || '00:00');
+    return { id: evt.id, start: effStart, end: Math.max(effEnd, effStart + 15) };
+  });
+  items.sort((a, b) => a.start - b.start || a.end - b.end);
+
+  const colEnds: number[] = [];
+  const colAssign = new Map<string, number>();
+
+  for (const item of items) {
+    let placed = false;
+    for (let c = 0; c < colEnds.length; c++) {
+      if (colEnds[c] <= item.start) {
+        colEnds[c] = item.end;
+        colAssign.set(item.id, c);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      colAssign.set(item.id, colEnds.length);
+      colEnds.push(item.end);
+    }
+  }
+
+  for (const item of items) {
+    const myCol = colAssign.get(item.id)!;
+    let maxCol = myCol;
+    for (const other of items) {
+      if (other.id === item.id) continue;
+      if (item.start < other.end && item.end > other.start) {
+        maxCol = Math.max(maxCol, colAssign.get(other.id)!);
+      }
+    }
+    result.set(item.id, { col: myCol, total: maxCol + 1 });
+  }
+  return result;
+}
+
+const _overlapCache = new Map<string, Map<string, OverlapInfo>>();
+
+function overlapLayoutForDay(day: Date): Map<string, OverlapInfo> {
+  const key = dateStr(day);
+  if (!_overlapCache.has(key)) {
+    _overlapCache.set(key, computeOverlapLayout(timedEventsForDate(day), day));
+  }
+  return _overlapCache.get(key)!;
+}
+
+watch(events, () => _overlapCache.clear(), { deep: true });
+watch(calendars, () => _overlapCache.clear(), { deep: true });
+watch(currentDate, () => _overlapCache.clear());
+watch(currentView, () => _overlapCache.clear());
+
+// ─── Timed event style ────────────────────────────────────────────────────────
+
+function timedEventStyle(evt: CalEvent, day?: Date, overlap?: OverlapInfo): Record<string, string> {
+  const ds = day ? dateStr(day) : evt.startDate;
+  const effStartTime = evt.startDate < ds ? '00:00' : evt.startTime;
+  const effEndTime = evt.endDate > ds ? '24:00' : evt.endTime;
+  const [sh, sm] = effStartTime.split(':').map(Number);
+  const [eh, em] = effEndTime.split(':').map(Number);
+  const top = (sh * 60 + sm) * (zoomLevel.value / 60);
   const dur = Math.max((eh * 60 + em) - (sh * 60 + sm), 15);
+
+  const col = overlap?.col ?? 0;
+  const total = overlap?.total ?? 1;
+  const widthPct = 100 / total;
+  const leftPct = col * widthPct;
+
   return {
     position: 'absolute',
     top: `${top}px`,
-    height: `${dur * (HOUR_PX / 60)}px`,
-    left: '3px', right: '3px',
+    height: `${dur * (zoomLevel.value / 60)}px`,
+    left: total > 1 ? `calc(${leftPct}% + 2px)` : '3px',
+    width: total > 1 ? `calc(${widthPct}% - 4px)` : 'calc(100% - 6px)',
+    right: 'unset',
     backgroundColor: calendarColor(evt.calendarId),
-    zIndex: '1',
+    zIndex: String(col + 1),
   };
+}
+
+function timedEventStyleWithOverlap(evt: CalEvent, day: Date): Record<string, string> {
+  const layout = overlapLayoutForDay(day);
+  return timedEventStyle(evt, day, layout.get(evt.id));
 }
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
@@ -668,7 +1293,13 @@ function openAddEventModal(date?: Date) {
     title: '', description: '', startDate: d, startTime: '09:00',
     endDate: d, endTime: '10:00', allDay: false,
     location: '', category: '', tagsInput: '', calendarId: defaultCalendarId(),
+    status: 'CONFIRMED', klass: 'PUBLIC', priority: 0, url: '',
+    attachInput: '', relatedTo: '', rrule: '',
+    rdateInput: '', exdateInput: '', transp: 'OPAQUE',
+    organizer: '', contact: '', attendeesInput: '',
+    alarmTrigger: '', alarmAction: 'DISPLAY', alarmDescription: '',
   };
+  evtTab.value = 'details';
   showEventModal.value = true;
 }
 
@@ -681,12 +1312,23 @@ function openEditEventModal(evt: CalEvent) {
     allDay: evt.allDay, location: evt.location,
     category: evt.category, tagsInput: evt.tags.join(', '),
     calendarId: evt.calendarId,
+    status: evt.status ?? 'CONFIRMED', klass: evt.klass ?? 'PUBLIC',
+    priority: evt.priority ?? 0, url: evt.url ?? '',
+    attachInput: (evt.attachUris ?? []).join('\n'), relatedTo: evt.relatedTo ?? '',
+    rrule: evt.rrule ?? '', rdateInput: (evt.rdates ?? []).join('\n'),
+    exdateInput: (evt.exdates ?? []).join('\n'), transp: evt.transp ?? 'OPAQUE',
+    organizer: evt.organizer ?? '', contact: evt.contact ?? '',
+    attendeesInput: (evt.attendees ?? []).join('\n'),
+    alarmTrigger: evt.alarmTrigger ?? '', alarmAction: evt.alarmAction ?? 'DISPLAY',
+    alarmDescription: evt.alarmDescription ?? '',
   };
+  evtTab.value = 'details';
   showEventModal.value = true;
 }
 
 function saveEvent() {
   if (!evtForm.value.title.trim()) return;
+  if (editingEvent.value?.readOnly) return; // read-only events cannot be modified
   const tags = evtForm.value.tagsInput.split(',').map(t => t.trim()).filter(Boolean);
   const base = {
     title: evtForm.value.title,
@@ -700,6 +1342,22 @@ function saveEvent() {
     category: evtForm.value.category,
     tags,
     calendarId: evtForm.value.calendarId,
+    status: evtForm.value.status || undefined,
+    klass: evtForm.value.klass || undefined,
+    priority: evtForm.value.priority || undefined,
+    url: evtForm.value.url || undefined,
+    attachUris: evtForm.value.attachInput ? evtForm.value.attachInput.split('\n').map(s=>s.trim()).filter(Boolean) : undefined,
+    relatedTo: evtForm.value.relatedTo || undefined,
+    rrule: evtForm.value.rrule || undefined,
+    rdates: evtForm.value.rdateInput ? evtForm.value.rdateInput.split('\n').map(s=>s.trim()).filter(Boolean) : undefined,
+    exdates: evtForm.value.exdateInput ? evtForm.value.exdateInput.split('\n').map(s=>s.trim()).filter(Boolean) : undefined,
+    transp: evtForm.value.transp || undefined,
+    organizer: evtForm.value.organizer || undefined,
+    contact: evtForm.value.contact || undefined,
+    attendees: evtForm.value.attendeesInput ? evtForm.value.attendeesInput.split('\n').map(s=>s.trim()).filter(Boolean) : undefined,
+    alarmTrigger: evtForm.value.alarmTrigger || undefined,
+    alarmAction: evtForm.value.alarmAction || undefined,
+    alarmDescription: evtForm.value.alarmDescription || undefined,
   };
 
   if (editingEvent.value) {
@@ -720,10 +1378,16 @@ function saveEvent() {
 
 function deleteCurrentEvent() {
   if (!editingEvent.value) return;
+  if (editingEvent.value.readOnly) return; // read-only events cannot be deleted
   const evt = editingEvent.value;
   events.value = events.value.filter(e => e.id !== evt.id);
   const cal = calendars.value.find(c => c.id === evt.calendarId);
-  if (cal?.isSubscription && cal.editable && evt.caldavUrl) deleteFromCalDAV(evt, cal);
+  if (cal?.isSubscription && cal.editable) {
+    // Construct URL if not directly stored (Nextcloud doesn't embed X-CALDAV-URL)
+    const delUrl = evt.caldavUrl
+      ?? `${cal.subscriptionUrl!.replace(/[?#].*$/, '').replace(/\/$/, '')}/${encodeURIComponent(evt.uid)}.ics`;
+    deleteFromCalDAV({ ...evt, caldavUrl: delUrl }, cal);
+  }
   saveToStorage();
   showEventModal.value = false;
 }
@@ -731,8 +1395,8 @@ function deleteCurrentEvent() {
 function handleTimeGridClick(e: MouseEvent, day: Date) {
   const target = e.currentTarget as HTMLElement;
   const y = e.clientY - target.getBoundingClientRect().top;
-  const hour = Math.floor(y / HOUR_PX);
-  const min  = Math.round((y % HOUR_PX) / HOUR_PX * 60 / 15) * 15;
+  const hour = Math.floor(y / zoomLevel.value);
+  const min  = Math.round((y % zoomLevel.value) / zoomLevel.value * 60 / 15) * 15;
   const startTime = `${String(hour).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
   const endHour = Math.min(hour + 1, 23);
   const endTime   = `${String(endHour).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
@@ -741,6 +1405,11 @@ function handleTimeGridClick(e: MouseEvent, day: Date) {
   evtForm.value = {
     title: '', description: '', startDate: d, startTime, endDate: d, endTime,
     allDay: false, location: '', category: '', tagsInput: '', calendarId: defaultCalendarId(),
+    status: 'CONFIRMED', klass: 'PUBLIC', priority: 0, url: '',
+    attachInput: '', relatedTo: '', rrule: '',
+    rdateInput: '', exdateInput: '', transp: 'OPAQUE',
+    organizer: '', contact: '', attendeesInput: '',
+    alarmTrigger: '', alarmAction: 'DISPLAY', alarmDescription: '',
   };
   showEventModal.value = true;
 }
@@ -749,33 +1418,70 @@ function handleTimeGridClick(e: MouseEvent, day: Date) {
 
 function openAddCalendarModal() {
   editingCalendar.value = null;
-  calForm.value = { name: '', color: getRandomColor() };
+  calForm.value = { name: '', color: getRandomColor(), url: '', username: '', password: '', editable: false, timezone: calSettings.value.myTimezone };
   showCalendarModal.value = true;
 }
 
 function openEditCalendarModal(cal: Calendar) {
   editingCalendar.value = cal;
-  calForm.value = { name: cal.name, color: cal.color };
+  calForm.value = {
+    name: cal.name, color: cal.color,
+    url: cal.subscriptionUrl ?? '', username: cal.username ?? '',
+    password: cal.password ?? '', editable: cal.editable ?? false,
+    timezone: cal.timezone ?? calSettings.value.myTimezone,
+  };
   showCalendarModal.value = true;
 }
 
 function saveCalendar() {
   if (!calForm.value.name.trim()) return;
+  const tz = normalizeTz(calForm.value.timezone); calForm.value.timezone = tz;
   if (editingCalendar.value) {
     const idx = calendars.value.findIndex(c => c.id === editingCalendar.value!.id);
-    if (idx >= 0) calendars.value[idx] = { ...calendars.value[idx], name: calForm.value.name, color: calForm.value.color };
+    if (idx >= 0) {
+      const updates: Partial<Calendar> = { name: calForm.value.name, color: calForm.value.color, timezone: calForm.value.timezone || undefined };
+      if (calendars.value[idx].isSubscription) {
+        updates.subscriptionUrl = calForm.value.url || undefined;
+        updates.username = calForm.value.username || undefined;
+        updates.password = calForm.value.password || undefined;
+        updates.editable = calForm.value.editable;
+      }
+      calendars.value[idx] = { ...calendars.value[idx], ...updates };
+    }
   } else {
-    calendars.value.push({ id: crypto.randomUUID(), name: calForm.value.name, color: calForm.value.color, visible: true, isSubscription: false });
+    calendars.value.push({ id: crypto.randomUUID(), name: calForm.value.name, color: calForm.value.color, visible: true, isSubscription: false, timezone: calForm.value.timezone || undefined });
   }
   saveToStorage();
   showCalendarModal.value = false;
 }
 
 function confirmDeleteCalendar(calId: string) {
-  if (!confirm('Delete this calendar and all its events?')) return;
+  if (!confirm('Move this calendar to the recycle bin?')) return;
+  const cal = calendars.value.find(c => c.id === calId);
+  if (!cal) return;
+  const calEvents = events.value.filter(e => e.calendarId === calId);
+  recycledCalendars.value.push({ calendar: cal, events: calEvents, deletedAt: new Date().toISOString() });
   calendars.value = calendars.value.filter(c => c.id !== calId);
   events.value = events.value.filter(e => e.calendarId !== calId);
   saveToStorage();
+}
+
+function restoreCalendar(entry: RecycleBinEntry) {
+  calendars.value.push(entry.calendar);
+  events.value.push(...entry.events);
+  recycledCalendars.value = recycledCalendars.value.filter(e => e.calendar.id !== entry.calendar.id);
+  saveToStorage();
+}
+
+function permanentlyDeleteCalendar(entry: RecycleBinEntry) {
+  if (!confirm(`Permanently delete "${entry.calendar.name}" and all its events? This cannot be undone.`)) return;
+  recycledCalendars.value = recycledCalendars.value.filter(e => e.calendar.id !== entry.calendar.id);
+  saveToStorage();
+}
+
+function recycleDaysAgo(iso: string): string {
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  return days === 0 ? 'Today' : `${days}d ago`;
 }
 
 function updateCalendarColor(calId: string, color: string) {
@@ -783,24 +1489,39 @@ function updateCalendarColor(calId: string, color: string) {
   if (cal) { cal.color = color; saveToStorage(); }
 }
 
+function setAllCalendarsVisible(visible: boolean) {
+  calendars.value.forEach(c => { c.visible = visible; });
+  saveToStorage();
+}
+
 // ─── CalDAV ───────────────────────────────────────────────────────────────────
 
+const { apiFetch } = useApi();
+
+async function fetchViaProxy(url: string, username?: string, password?: string): Promise<string> {
+  return apiFetch<string>('/caldav/proxy', {
+    method: 'POST',
+    body: { url, username: username || undefined, password: password || undefined },
+    responseType: 'text',
+  });
+}
+
 function openCalDAVModal() {
-  cdForm.value = { name: '', url: '', color: '#8b5cf6', username: '', password: '', editable: false };
+  cdStep.value = 1;
+  cdCreds.value = { url: '', username: '', password: '' };
+  cdSelected.value = [];
   cdError.value = '';
   showCalDAVModal.value = true;
 }
 
-async function subscribeCalDAV() {
-  if (!cdForm.value.name.trim() || !cdForm.value.url.trim()) {
-    cdError.value = 'Please provide a name and URL.';
+async function discoverCalendars() {
+  if (!cdCreds.value.url.trim()) {
+    cdError.value = 'Please enter a server URL.';
     return;
   }
-  // Basic URL validation – only allow http/https to prevent SSRF via other schemes
-  let parsedUrl: URL;
   try {
-    parsedUrl = new URL(cdForm.value.url);
-    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+    const p = new URL(cdCreds.value.url);
+    if (p.protocol !== 'http:' && p.protocol !== 'https:') {
       cdError.value = 'Only HTTP and HTTPS URLs are supported.';
       return;
     }
@@ -811,42 +1532,172 @@ async function subscribeCalDAV() {
   isCdLoading.value = true;
   cdError.value = '';
   try {
-    const headers: Record<string, string> = { Accept: 'text/calendar,application/ics,*/*' };
-    if (cdForm.value.username && cdForm.value.password) {
-      headers['Authorization'] = `Basic ${btoa(`${cdForm.value.username}:${cdForm.value.password}`)}`;
-    }
-    const icsText = await $fetch<string>(parsedUrl.toString(), { headers, responseType: 'text' });
-    const calId = crypto.randomUUID();
-    calendars.value.push({
-      id: calId, name: cdForm.value.name, color: cdForm.value.color,
-      visible: true, isSubscription: true, subscriptionUrl: cdForm.value.url,
-      username: cdForm.value.username || undefined, password: cdForm.value.password || undefined,
-      editable: cdForm.value.editable,
+    const discovered = await apiFetch<{ href: string; name: string; color: string | null }[]>('/caldav/discover', {
+      method: 'POST',
+      body: { url: cdCreds.value.url, username: cdCreds.value.username || undefined, password: cdCreds.value.password || undefined },
     });
-    importParsedEvents(parseICS(icsText), calId, !cdForm.value.editable);
-    saveToStorage();
-    showCalDAVModal.value = false;
+    cdSelected.value = discovered.map((d, i) => ({
+      href: d.href,
+      name: d.name,
+      color: d.color ?? RAINBOW[i % RAINBOW.length],
+      editable: false,
+      included: true,
+      timezone: calSettings.value.myTimezone,
+    }));
+    cdStep.value = 2;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    cdError.value = `Failed to fetch: ${msg}. Some servers block cross-origin requests (CORS).`;
+    cdError.value = `Discovery failed: ${msg}`;
   } finally {
     isCdLoading.value = false;
   }
 }
 
+function cdGoToSummary() {
+  if (!cdSelected.value.some(c => c.included)) return;
+  cdError.value = '';
+  cdStep.value = 3;
+}
+
+async function subscribeAllCalDAV() {
+  isCdLoading.value = true;
+  cdError.value = '';
+  try {
+    for (const cal of cdSelected.value.filter(c => c.included)) {
+      const icsText = await fetchViaProxy(cal.href, cdCreds.value.username, cdCreds.value.password);
+      // Try to detect calendar timezone from VTIMEZONE if not manually set
+      const detectedTZ = extractVTimezoneId(icsText);
+      const calTZ = normalizeTz(cal.timezone || detectedTZ || calSettings.value.myTimezone);
+      const calId = crypto.randomUUID();
+      calendars.value.push({
+        id: calId, name: cal.name, color: cal.color,
+        visible: true, isSubscription: true, subscriptionUrl: cal.href,
+        username: cdCreds.value.username || undefined, password: cdCreds.value.password || undefined,
+        editable: cal.editable,
+        timezone: calTZ,
+      });
+      importParsedEvents(parseICS(icsText, { calTZ, userTZ: calSettings.value.myTimezone }), calId, !cal.editable);
+    }
+    saveToStorage();
+    showCalDAVModal.value = false;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    cdError.value = `Failed to subscribe: ${msg}`;
+  } finally {
+    isCdLoading.value = false;
+  }
+}
+
+// Keep legacy single-URL subscribe for backward compatibility (used internally by syncCalDAV-related paths)
+async function subscribeCalDAV() { /* replaced by wizard – subscribeAllCalDAV */ }
+
+async function syncAllCalDAV() {
+  const subs = calendars.value.filter(c => c.isSubscription && c.subscriptionUrl);
+  if (subs.length === 0) return;
+  await Promise.allSettled(subs.map(cal => syncCalDAV(cal)));
+}
+
 async function syncCalDAV(cal: Calendar) {
   if (!cal.subscriptionUrl) return;
   try {
-    const headers: Record<string, string> = { Accept: 'text/calendar,*/*' };
-    if (cal.username && cal.password) {
-      headers['Authorization'] = `Basic ${btoa(`${cal.username}:${cal.password}`)}`;
+    const icsText = await fetchViaProxy(cal.subscriptionUrl, cal.username, cal.password);
+    const parsed = parseICS(icsText, { calTZ: cal.timezone, userTZ: calSettings.value.myTimezone });
+
+    // Build a set of UIDs present on the remote server
+    const remoteUids = new Set(parsed.filter(p => p.uid).map(p => p.uid!));
+
+    // Remove stale events from this subscription calendar:
+    // - Read-only: full refresh — remove ALL events for this calendar so remote is authoritative
+    // - Editable: keep locally-created events (no caldavUrl = not yet pushed), remove server-deleted ones
+    events.value = events.value.filter(e => {
+      if (e.calendarId !== cal.id) return true;
+      if (!cal.editable) return false; // read-only: always replace with remote
+      if (!e.caldavUrl) return true;   // editable + locally-created: keep
+      return remoteUids.has(e.uid);    // editable + synced: keep if still on server
+    });
+
+    // Merge remote events into local list
+    for (const pe of parsed) {
+      if (!pe.title) continue;
+      const existingIdx = events.value.findIndex(
+        e => e.calendarId === cal.id && e.uid === pe.uid,
+      );
+      if (existingIdx >= 0) {
+        // Update existing event from server data
+        const existing = events.value[existingIdx];
+        events.value[existingIdx] = {
+          ...existing,
+          title: pe.title,
+          description: pe.description ?? existing.description,
+          startDate: pe.startDate ?? existing.startDate,
+          startTime: pe.startTime ?? existing.startTime,
+          endDate: pe.endDate ?? existing.endDate,
+          endTime: pe.endTime ?? existing.endTime,
+          allDay: pe.allDay ?? existing.allDay,
+          location: pe.location ?? existing.location,
+          category: pe.category ?? existing.category,
+          tags: pe.tags ?? existing.tags,
+          caldavUrl: pe.caldavUrl ?? existing.caldavUrl,
+          readOnly: !cal.editable,
+          status: pe.status ?? existing.status,
+          klass: pe.klass ?? existing.klass,
+          priority: pe.priority ?? existing.priority,
+          url: pe.url ?? existing.url,
+          attachUris: pe.attachUris ?? existing.attachUris,
+          relatedTo: pe.relatedTo ?? existing.relatedTo,
+          rrule: pe.rrule ?? existing.rrule,
+          rdates: pe.rdates ?? existing.rdates,
+          exdates: pe.exdates ?? existing.exdates,
+          transp: pe.transp ?? existing.transp,
+          organizer: pe.organizer ?? existing.organizer,
+          contact: pe.contact ?? existing.contact,
+          attendees: pe.attendees ?? existing.attendees,
+          alarmTrigger: pe.alarmTrigger ?? existing.alarmTrigger,
+          alarmAction: pe.alarmAction ?? existing.alarmAction,
+          alarmDescription: pe.alarmDescription ?? existing.alarmDescription,
+        };
+      } else {
+        // New event from server — add it
+        events.value.push({
+          id: crypto.randomUUID(),
+          uid: pe.uid ?? `${crypto.randomUUID()}@ronbureau`,
+          calendarId: cal.id,
+          title: pe.title,
+          description: pe.description ?? '',
+          startDate: pe.startDate ?? dateStr(new Date()),
+          startTime: pe.startTime ?? '00:00',
+          endDate: pe.endDate ?? (pe.startDate ?? dateStr(new Date())),
+          endTime: pe.endTime ?? '23:59',
+          allDay: pe.allDay ?? false,
+          location: pe.location ?? '',
+          category: pe.category ?? '',
+          tags: pe.tags ?? [],
+          caldavUrl: pe.caldavUrl,
+          readOnly: !cal.editable,
+          status: pe.status,
+          klass: pe.klass,
+          priority: pe.priority,
+          url: pe.url,
+          attachUris: pe.attachUris,
+          relatedTo: pe.relatedTo,
+          rrule: pe.rrule,
+          rdates: pe.rdates,
+          exdates: pe.exdates,
+          transp: pe.transp,
+          organizer: pe.organizer,
+          contact: pe.contact,
+          attendees: pe.attendees,
+          alarmTrigger: pe.alarmTrigger,
+          alarmAction: pe.alarmAction,
+          alarmDescription: pe.alarmDescription,
+        });
+      }
     }
-    const icsText = await $fetch<string>(cal.subscriptionUrl, { headers, responseType: 'text' });
-    events.value = events.value.filter(e => e.calendarId !== cal.id);
-    importParsedEvents(parseICS(icsText), cal.id, !cal.editable);
+
     saveToStorage();
   } catch (err) {
     console.error('CalDAV sync failed:', err);
+    alert(`CalDAV sync failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -859,11 +1710,16 @@ async function syncEventToCalDAV(evt: CalEvent, cal: Calendar) {
   if (!cal.subscriptionUrl) return;
   try {
     const eventUrl = evt.caldavUrl ?? `${cal.subscriptionUrl.replace(/\/$/, '')}/${encodeURIComponent(evt.uid)}.ics`;
-    const headers: Record<string, string> = { 'Content-Type': 'text/calendar; charset=utf-8' };
-    if (cal.username && cal.password) {
-      headers['Authorization'] = `Basic ${btoa(`${cal.username}:${cal.password}`)}`;
-    }
-    await $fetch(eventUrl, { method: 'PUT', headers, body: generateICS([evt]) });
+    await apiFetch('/caldav/write', {
+      method: 'POST',
+      body: {
+        url: eventUrl,
+        method: 'PUT',
+        body: generateICS([evt]),
+        username: cal.username || undefined,
+        password: cal.password || undefined,
+      },
+    });
     if (!evt.caldavUrl) {
       const idx = events.value.findIndex(e => e.id === evt.id);
       if (idx >= 0) events.value[idx].caldavUrl = eventUrl;
@@ -871,20 +1727,111 @@ async function syncEventToCalDAV(evt: CalEvent, cal: Calendar) {
     }
   } catch (err) {
     console.error('CalDAV PUT failed:', err);
+    alert(`Failed to sync event to CalDAV server: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
 async function deleteFromCalDAV(evt: CalEvent, cal: Calendar) {
   if (!evt.caldavUrl) return;
   try {
-    const headers: Record<string, string> = {};
-    if (cal.username && cal.password) {
-      headers['Authorization'] = `Basic ${btoa(`${cal.username}:${cal.password}`)}`;
-    }
-    await $fetch(evt.caldavUrl, { method: 'DELETE', headers });
+    await apiFetch('/caldav/write', {
+      method: 'POST',
+      body: {
+        url: evt.caldavUrl,
+        method: 'DELETE',
+        username: cal.username || undefined,
+        password: cal.password || undefined,
+      },
+    });
   } catch (err) {
     console.error('CalDAV DELETE failed:', err);
+    alert(`Failed to delete event from CalDAV server: ${err instanceof Error ? err.message : String(err)}`);
   }
+}
+
+// ─── Timezone Utilities ───────────────────────────────────────────────────────
+
+/** List of IANA timezone IDs for autocomplete */
+const ianaTimezones: string[] = (() => {
+  try { return (Intl as any).supportedValuesOf('timeZone') as string[]; } catch { return []; }
+})();
+
+/** Returns " (UTC+X)" string for a given IANA timezone at the current moment */
+function getUtcOffsetLabel(tz: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en', {
+      timeZone: tz, timeZoneName: 'shortOffset',
+    }).formatToParts(new Date());
+    const raw = parts.find(p => p.type === 'timeZoneName')?.value ?? '';
+    return raw ? ` (${raw.replace('GMT', 'UTC')})` : '';
+  } catch { return ''; }
+}
+
+/** Strip " (UTC...)" or " (GMT...)" suffix from a timezone string to get the pure IANA ID */
+function normalizeTz(s: string): string {
+  return s.replace(/\s*\([^)]*\)\s*$/, '').trim();
+}
+
+const ianaTimezonesWithOffset = computed(() =>
+  ianaTimezones.map(tz => `${tz}${getUtcOffsetLabel(tz)}`)
+);
+
+/**
+ * Convert a wall-clock date+time expressed in `tz` to a UTC Date.
+ * Uses a two-pass approach to handle DST edge cases.
+ */
+function wallToUTC(dateStr: string, timeStr: string, tz: string): Date {
+  const [y, mo, d] = dateStr.split('-').map(Number);
+  const [h, mi] = (timeStr || '00:00').split(':').map(Number);
+  const guessMs = Date.UTC(y, mo - 1, d, h, mi, 0);
+
+  function offsetAt(utcMs: number): number {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+    }).formatToParts(new Date(utcMs));
+    const g = (t: string) => parseInt(parts.find(p => p.type === t)?.value ?? '0');
+    const tzMs = Date.UTC(g('year'), g('month') - 1, g('day'), g('hour'), g('minute'), g('second'));
+    return (tzMs - utcMs) / 60000;
+  }
+
+  const off1 = offsetAt(guessMs);
+  const approx = guessMs - off1 * 60000;
+  const off2 = offsetAt(approx);
+  return new Date(guessMs - off2 * 60000);
+}
+
+/**
+ * Format a UTC Date as wall-clock {date, time} in a given IANA timezone.
+ */
+function utcToWall(date: Date, tz: string): { date: string; time: string } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(date);
+  const g = (t: string) => parts.find(p => p.type === t)?.value ?? '00';
+  const hh = g('hour') === '24' ? '00' : g('hour');
+  return { date: `${g('year')}-${g('month')}-${g('day')}`, time: `${hh}:${g('minute')}` };
+}
+
+/**
+ * Convert wall-clock date+time from one IANA timezone to another.
+ * Returns unchanged values if both timezones are the same.
+ */
+function convertWallClock(dateStr: string, timeStr: string, fromTZ: string, toTZ: string): { date: string; time: string } {
+  if (!dateStr || !timeStr) return { date: dateStr, time: timeStr };
+  if (fromTZ === toTZ) return { date: dateStr, time: timeStr };
+  try {
+    return utcToWall(wallToUTC(dateStr, timeStr, fromTZ), toTZ);
+  } catch {
+    return { date: dateStr, time: timeStr }; // fallback: no conversion
+  }
+}
+
+/** Extract the primary TZID from a VTIMEZONE block in ICS content */
+function extractVTimezoneId(content: string): string | null {
+  const m = content.match(/BEGIN:VTIMEZONE[\s\S]*?TZID:([^\r\n]+)/);
+  return m ? m[1].trim() : null;
 }
 
 // ─── ICS Export ───────────────────────────────────────────────────────────────
@@ -903,6 +1850,7 @@ function foldLine(line: string): string {
 function generateICS(evts: CalEvent[]): string {
   // Format: YYYYMMDDTHHmmssZ (ISO 8601 basic format without milliseconds)
   const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '') + 'Z';
+  const userTZ = calSettings.value.myTimezone;
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//RonBureau//Calendar 1.0//EN', 'CALSCALE:GREGORIAN'];
   for (const e of evts) {
     lines.push('BEGIN:VEVENT');
@@ -920,8 +1868,37 @@ function generateICS(evts: CalEvent[]): string {
       const excl = new Date(ey, em - 1, ed + 1);
       lines.push(`DTEND;VALUE=DATE:${dateStr(excl).replace(/-/g, '')}`);
     } else {
-      lines.push(`DTSTART:${e.startDate.replace(/-/g, '')}T${e.startTime.replace(':', '')}00`);
-      lines.push(`DTEND:${e.endDate.replace(/-/g, '')}T${e.endTime.replace(':', '')}00`);
+      // Convert wall-clock times from user's timezone to UTC
+      const fmtUTC = (d: Date) => d.toISOString().slice(0, 19).replace(/[-:]/g, '') + 'Z';
+      try {
+        lines.push(`DTSTART:${fmtUTC(wallToUTC(e.startDate, e.startTime, userTZ))}`);
+        lines.push(`DTEND:${fmtUTC(wallToUTC(e.endDate, e.endTime, userTZ))}`);
+      } catch {
+        // Fallback: write as naive local time (no timezone suffix)
+        lines.push(`DTSTART:${e.startDate.replace(/-/g, '')}T${e.startTime.replace(':', '')}00`);
+        lines.push(`DTEND:${e.endDate.replace(/-/g, '')}T${e.endTime.replace(':', '')}00`);
+      }
+    }
+    if (e.status)    lines.push(`STATUS:${e.status}`);
+    if (e.klass)     lines.push(`CLASS:${e.klass}`);
+    if (e.priority !== undefined && e.priority > 0) lines.push(`PRIORITY:${e.priority}`);
+    if (e.url)       lines.push(foldLine(`URL:${e.url}`));
+    for (const a of (e.attachUris ?? [])) lines.push(foldLine(`ATTACH:${a}`));
+    if (e.relatedTo) lines.push(`RELATED-TO:${e.relatedTo}`);
+    if (e.rrule)     lines.push(`RRULE:${e.rrule}`);
+    for (const rd of (e.rdates ?? [])) lines.push(`RDATE:${rd}`);
+    for (const ex of (e.exdates ?? [])) lines.push(`EXDATE:${ex}`);
+    if (e.transp)    lines.push(`TRANSP:${e.transp}`);
+    if (e.organizer) lines.push(`ORGANIZER:${e.organizer}`);
+    if (e.contact)   lines.push(foldLine(`CONTACT:${escapeICS(e.contact)}`));
+    for (const att of (e.attendees ?? [])) lines.push(foldLine(`ATTENDEE:${att}`));
+    if (e.alarmTrigger) {
+      lines.push('BEGIN:VALARM');
+      lines.push(`ACTION:${e.alarmAction ?? 'DISPLAY'}`);
+      lines.push(`TRIGGER:${e.alarmTrigger}`);
+      if (e.alarmDescription) lines.push(foldLine(`DESCRIPTION:${escapeICS(e.alarmDescription)}`));
+      else lines.push(`DESCRIPTION:Reminder`);
+      lines.push('END:VALARM');
     }
     lines.push('END:VEVENT');
   }
@@ -930,9 +1907,10 @@ function generateICS(evts: CalEvent[]): string {
 }
 
 function exportICS() {
-  const toExport = exportCalId.value === 'all'
+  const selected = exportSelectedIds.value;
+  const toExport = selected.length === 0
     ? events.value
-    : events.value.filter(e => e.calendarId === exportCalId.value);
+    : events.value.filter(e => selected.includes(e.calendarId));
   if (!toExport.length) { alert('No events to export.'); return; }
   const blob = new Blob([generateICS(toExport)], { type: 'text/calendar;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -941,18 +1919,137 @@ function exportICS() {
   URL.revokeObjectURL(url);
 }
 
+function exportSingleEventICS() {
+  if (!editingEvent.value) return;
+  const evt = editingEvent.value;
+  const blob = new Blob([generateICS([evt])], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), {
+    href: url,
+    download: `${evt.title.replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '_') || 'event'}.ics`,
+  });
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function openRawIcsModal() {
+  if (!editingEvent.value && !evtForm.value.title) return;
+  const tempEvt: CalEvent = editingEvent.value
+    ? { ...editingEvent.value }
+    : {
+        id: '', uid: crypto.randomUUID() + '@ronbureau', calendarId: evtForm.value.calendarId,
+        title: evtForm.value.title, description: evtForm.value.description,
+        startDate: evtForm.value.startDate, startTime: evtForm.value.startTime,
+        endDate: evtForm.value.endDate, endTime: evtForm.value.endTime,
+        allDay: evtForm.value.allDay, location: evtForm.value.location,
+        category: evtForm.value.category,
+        tags: evtForm.value.tagsInput.split(',').map(t=>t.trim()).filter(Boolean),
+        status: evtForm.value.status, klass: evtForm.value.klass,
+        priority: evtForm.value.priority || undefined, url: evtForm.value.url,
+        attachUris: evtForm.value.attachInput ? evtForm.value.attachInput.split('\n').map(s=>s.trim()).filter(Boolean) : [],
+        relatedTo: evtForm.value.relatedTo, rrule: evtForm.value.rrule,
+        rdates: evtForm.value.rdateInput ? evtForm.value.rdateInput.split('\n').map(s=>s.trim()).filter(Boolean) : [],
+        exdates: evtForm.value.exdateInput ? evtForm.value.exdateInput.split('\n').map(s=>s.trim()).filter(Boolean) : [],
+        transp: evtForm.value.transp, organizer: evtForm.value.organizer,
+        contact: evtForm.value.contact,
+        attendees: evtForm.value.attendeesInput ? evtForm.value.attendeesInput.split('\n').map(s=>s.trim()).filter(Boolean) : [],
+        alarmTrigger: evtForm.value.alarmTrigger, alarmAction: evtForm.value.alarmAction,
+        alarmDescription: evtForm.value.alarmDescription,
+      };
+  rawIcsContent.value = generateICS([tempEvt]);
+  showRawIcsModal.value = true;
+}
+
+function applyRawIcs() {
+  try {
+    const parsed = parseICS(rawIcsContent.value, { userTZ: calSettings.value.myTimezone });
+    if (!parsed.length) { alert('No valid VEVENT found in ICS.'); return; }
+    const pe = parsed[0];
+    if (pe.title) evtForm.value.title = pe.title;
+    if (pe.description !== undefined) evtForm.value.description = pe.description;
+    if (pe.startDate) { evtForm.value.startDate = pe.startDate; evtForm.value.startTime = pe.startTime ?? evtForm.value.startTime; }
+    if (pe.endDate) { evtForm.value.endDate = pe.endDate; evtForm.value.endTime = pe.endTime ?? evtForm.value.endTime; }
+    if (pe.allDay !== undefined) evtForm.value.allDay = pe.allDay;
+    if (pe.location !== undefined) evtForm.value.location = pe.location;
+    if (pe.category !== undefined) evtForm.value.category = pe.category;
+    if (pe.tags) evtForm.value.tagsInput = pe.tags.join(', ');
+    if (pe.status) evtForm.value.status = pe.status;
+    if (pe.klass) evtForm.value.klass = pe.klass;
+    if (pe.priority !== undefined) evtForm.value.priority = pe.priority;
+    if (pe.url !== undefined) evtForm.value.url = pe.url;
+    if (pe.attachUris?.length) evtForm.value.attachInput = pe.attachUris.join('\n');
+    if (pe.relatedTo) evtForm.value.relatedTo = pe.relatedTo;
+    if (pe.rrule) evtForm.value.rrule = pe.rrule;
+    if (pe.rdates?.length) evtForm.value.rdateInput = pe.rdates.join('\n');
+    if (pe.exdates?.length) evtForm.value.exdateInput = pe.exdates.join('\n');
+    if (pe.transp) evtForm.value.transp = pe.transp;
+    if (pe.organizer) evtForm.value.organizer = pe.organizer;
+    if (pe.contact) evtForm.value.contact = pe.contact;
+    if (pe.attendees?.length) evtForm.value.attendeesInput = pe.attendees.join('\n');
+    if (pe.alarmTrigger) evtForm.value.alarmTrigger = pe.alarmTrigger;
+    if (pe.alarmAction) evtForm.value.alarmAction = pe.alarmAction;
+    if (pe.alarmDescription) evtForm.value.alarmDescription = pe.alarmDescription;
+    showRawIcsModal.value = false;
+  } catch (e) {
+    alert('Failed to parse ICS: ' + (e instanceof Error ? e.message : String(e)));
+  }
+}
+
 // ─── ICS Import ───────────────────────────────────────────────────────────────
 
-function parseICS(content: string): ParsedICSEvent[] {
+function parseICS(content: string, options?: { calTZ?: string; userTZ?: string }): ParsedICSEvent[] {
+  const userTZ = options?.userTZ || calSettings.value.myTimezone;
   // Unfold (RFC 5545: CRLF + LWSP-char)
   const unfolded = content.replace(/\r\n([ \t])/g, '$1').replace(/\n([ \t])/g, '$1');
   const lines = unfolded.split(/\r?\n/);
   const result: ParsedICSEvent[] = [];
   let cur: ParsedICSEvent | null = null;
+  let inValarm = false;
+
+  // Extract primary VTIMEZONE TZID as the default calendar timezone
+  const vtimezone = extractVTimezoneId(content);
+  const calTZ = options?.calTZ || vtimezone || userTZ;
+
+  /** Parse a DTSTART/DTEND value into {date, time, allDay}, converting to userTZ */
+  function parseDT(rawVal: string, params: string): { date: string; time: string; allDay: boolean; tzid: string } {
+    const isUtcSuffix = rawVal.trimEnd().endsWith('Z');
+    const clean = rawVal.replace(/Z\s*$/, '').trim();
+
+    // Detect explicit TZID in params: ;TZID=America/New_York
+    const tzidMatch = params.match(/TZID=([^;:]+)/i);
+    const explicitTzid = tzidMatch ? tzidMatch[1].trim() : null;
+
+    const dateOnly = (params.toUpperCase().includes('VALUE=DATE') && !params.toUpperCase().includes('DATE-TIME'))
+      || (clean.length === 8 && /^\d{8}$/.test(clean));
+
+    if (dateOnly) {
+      return {
+        date: `${clean.slice(0,4)}-${clean.slice(4,6)}-${clean.slice(6,8)}`,
+        time: '00:00', allDay: true,
+        tzid: calTZ,
+      };
+    }
+
+    const ti = clean.indexOf('T');
+    const dp = ti > 0 ? clean.substring(0, ti) : clean;
+    const tp = ti > 0 ? clean.substring(ti + 1) : '000000';
+    const dateRaw = `${dp.slice(0,4)}-${dp.slice(4,6)}-${dp.slice(6,8)}`;
+    const timeRaw = `${tp.slice(0,2)}:${tp.slice(2,4)}`;
+
+    // Determine source timezone
+    const sourceTZ = isUtcSuffix ? 'UTC' : (explicitTzid ?? calTZ);
+    const tzid = sourceTZ;
+
+    // Convert to userTZ
+    const converted = convertWallClock(dateRaw, timeRaw, sourceTZ, userTZ);
+    return { date: converted.date, time: converted.time, allDay: false, tzid };
+  }
 
   for (const line of lines) {
-    if (line.trim() === 'BEGIN:VEVENT') { cur = {}; continue; }
-    if (line.trim() === 'END:VEVENT') { if (cur?.title) result.push(cur); cur = null; continue; }
+    if (line.trim() === 'BEGIN:VEVENT') { cur = {}; inValarm = false; continue; }
+    if (line.trim() === 'END:VEVENT') { if (cur?.title) result.push(cur); cur = null; inValarm = false; continue; }
+    if (line.trim() === 'BEGIN:VALARM') { inValarm = true; continue; }
+    if (line.trim() === 'END:VALARM') { inValarm = false; continue; }
     if (!cur) continue;
 
     const ci = line.indexOf(':');
@@ -962,44 +2059,52 @@ function parseICS(content: string): ParsedICSEvent[] {
     const val = rawVal.replace(/\\n/gi, '\n').replace(/\\,/g, ',').replace(/\\;/g, ';').replace(/\\\\/g, '\\').trim();
     const si = prop.indexOf(';');
     const base = (si >= 0 ? prop.substring(0, si) : prop).toUpperCase();
-    const params = (si >= 0 ? prop.substring(si) : '').toUpperCase();
+    const params = si >= 0 ? prop.substring(si) : '';
 
     switch (base) {
       case 'SUMMARY':     cur.title = val; break;
-      case 'DESCRIPTION': cur.description = val; break;
+      case 'DESCRIPTION':
+        if (inValarm) cur.alarmDescription = val;
+        else cur.description = val;
+        break;
       case 'LOCATION':    cur.location = val; break;
       case 'CATEGORIES':  cur.category = val.split(',')[0].trim(); break;
       case 'X-TAGS':      cur.tags = val.split(',').map(t => t.trim()).filter(Boolean); break;
+      case 'X-CALDAV-URL': cur.caldavUrl = rawVal.trim(); break;
       case 'UID':         cur.uid = val; break;
+      case 'STATUS':      cur.status = val.toUpperCase(); break;
+      case 'CLASS':       cur.klass = val.toUpperCase(); break;
+      case 'PRIORITY':    cur.priority = parseInt(val) || 0; break;
+      case 'URL':         cur.url = val; break;
+      case 'ATTACH':      cur.attachUris = [...(cur.attachUris ?? []), rawVal.trim()]; break;
+      case 'RELATED-TO':  cur.relatedTo = val; break;
+      case 'RRULE':       cur.rrule = rawVal.trim(); break;
+      case 'RDATE':       cur.rdates = [...(cur.rdates ?? []), rawVal.trim()]; break;
+      case 'EXDATE':      cur.exdates = [...(cur.exdates ?? []), rawVal.trim()]; break;
+      case 'TRANSP':      cur.transp = val.toUpperCase(); break;
+      case 'ORGANIZER':   cur.organizer = rawVal.trim(); break;
+      case 'CONTACT':     cur.contact = val; break;
+      case 'ATTENDEE':    cur.attendees = [...(cur.attendees ?? []), rawVal.trim()]; break;
+      case 'TRIGGER':     if (inValarm) cur.alarmTrigger = rawVal.trim(); break;
+      case 'ACTION':      if (inValarm) cur.alarmAction = val.toUpperCase(); break;
       case 'DTSTART': {
-        const dateOnly = params.includes('VALUE=DATE') && !params.includes('DATE-TIME');
-        const clean = rawVal.replace('Z', '').trim();
-        if (dateOnly || (clean.length === 8 && /^\d{8}$/.test(clean))) {
-          cur.allDay = true;
-          cur.startDate = `${clean.slice(0,4)}-${clean.slice(4,6)}-${clean.slice(6,8)}`;
-        } else {
-          const ti = clean.indexOf('T');
-          const d = ti > 0 ? clean.substring(0, ti) : clean;
-          const t = ti > 0 ? clean.substring(ti + 1) : '';
-          cur.startDate = `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`;
-          if (t) cur.startTime = `${t.slice(0,2)}:${t.slice(2,4)}`;
-        }
+        const dt = parseDT(rawVal, params);
+        cur.allDay = dt.allDay;
+        cur.startDate = dt.date;
+        if (!dt.allDay) cur.startTime = dt.time;
+        cur.sourceTzid = dt.tzid;
         break;
       }
       case 'DTEND': {
-        const dateOnly = params.includes('VALUE=DATE') && !params.includes('DATE-TIME');
-        const clean = rawVal.replace('Z', '').trim();
-        if (dateOnly || (clean.length === 8 && /^\d{8}$/.test(clean))) {
+        const dt = parseDT(rawVal, params);
+        if (dt.allDay) {
           // ICS all-day end is exclusive; subtract 1 day
-          const endEx = new Date(parseInt(clean.slice(0,4)), parseInt(clean.slice(4,6))-1, parseInt(clean.slice(6,8)));
+          const endEx = new Date(parseInt(dt.date.slice(0,4)), parseInt(dt.date.slice(5,7))-1, parseInt(dt.date.slice(8,10)));
           endEx.setDate(endEx.getDate() - 1);
           cur.endDate = dateStr(endEx);
         } else {
-          const ti = clean.indexOf('T');
-          const d = ti > 0 ? clean.substring(0, ti) : clean;
-          const t = ti > 0 ? clean.substring(ti + 1) : '';
-          cur.endDate = `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`;
-          if (t) cur.endTime = `${t.slice(0,2)}:${t.slice(2,4)}`;
+          cur.endDate = dt.date;
+          cur.endTime = dt.time;
         }
         break;
       }
@@ -1027,6 +2132,22 @@ function importParsedEvents(parsed: ParsedICSEvent[], calId: string, readOnly = 
       tags: pe.tags ?? [],
       caldavUrl: pe.caldavUrl,
       readOnly,
+      status: pe.status,
+      klass: pe.klass,
+      priority: pe.priority,
+      url: pe.url,
+      attachUris: pe.attachUris,
+      relatedTo: pe.relatedTo,
+      rrule: pe.rrule,
+      rdates: pe.rdates,
+      exdates: pe.exdates,
+      transp: pe.transp,
+      organizer: pe.organizer,
+      contact: pe.contact,
+      attendees: pe.attendees,
+      alarmTrigger: pe.alarmTrigger,
+      alarmAction: pe.alarmAction,
+      alarmDescription: pe.alarmDescription,
     });
   }
 }
@@ -1039,7 +2160,12 @@ function importICSFile(event: Event) {
   const reader = new FileReader();
   reader.onload = (ev) => {
     try {
-      const parsed = parseICS(ev.target?.result as string);
+      const icsContent = ev.target?.result as string;
+      const targetCal = calendars.value.find(c => c.id === calId);
+      const parsed = parseICS(icsContent, {
+        calTZ: targetCal?.timezone || extractVTimezoneId(icsContent) || calSettings.value.myTimezone,
+        userTZ: calSettings.value.myTimezone,
+      });
       const before = events.value.length;
       importParsedEvents(parsed, calId);
       saveToStorage();
@@ -1056,7 +2182,336 @@ function importICSFile(event: Event) {
 
 // ─── Print ────────────────────────────────────────────────────────────────────
 
-function printCalendar() { window.print(); }
+function openPrintModal() {
+  const fmt = auth.userPreferences?.datetimeFormat ?? 'ISO';
+  // Default date range from current view
+  let start: Date;
+  let end: Date;
+  if (currentView.value === 'day') {
+    start = new Date(currentDate.value);
+    end   = new Date(currentDate.value);
+  } else if (currentView.value === 'week') {
+    start = getWeekStart(currentDate.value);
+    end   = new Date(start); end.setDate(end.getDate() + 6);
+  } else {
+    const y = currentDate.value.getFullYear(), m = currentDate.value.getMonth();
+    start = new Date(y, m, 1);
+    end   = new Date(y, m + 1, 0);
+  }
+  printForm.value = {
+    startDate: dateStr(start),
+    endDate:   dateStr(end),
+    viewMode:  currentView.value,
+    infoLevel: 'full',
+  };
+  printError.value = '';
+  showPrintModal.value = true;
+}
+
+function formatPrintDate(d: Date): string {
+  const fmt = auth.userPreferences?.datetimeFormat ?? 'ISO';
+  switch (fmt) {
+    case 'US':    return d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+    case 'EU':    return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    case 'Short': return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    default:      return dateStr(d);
+  }
+}
+
+function getEventsForDate(dStr: string): CalEvent[] {
+  return events.value.filter(e => {
+    const cal = calendars.value.find(c => c.id === e.calendarId);
+    if (!cal?.visible) return false;
+    return e.startDate <= dStr && e.endDate >= dStr;
+  });
+}
+
+async function exportPDF() {
+  if (!printForm.value.startDate || !printForm.value.endDate) {
+    printError.value = 'Please set a date range.';
+    return;
+  }
+  if (printForm.value.startDate > printForm.value.endDate) {
+    printError.value = 'Start date must be before end date.';
+    return;
+  }
+  isPrinting.value = true;
+  printError.value = '';
+  try {
+    const { viewMode, infoLevel } = printForm.value;
+    const rangeStart = new Date(printForm.value.startDate + 'T00:00:00');
+    const rangeEnd   = new Date(printForm.value.endDate   + 'T00:00:00');
+    const userName   = auth.currentUser?.displayName ?? auth.currentUser?.userId ?? 'User';
+    const userId     = auth.currentUser?.userId ?? '';
+    const orgId      = auth.currentUser?.organizationId ?? '';
+    const titleStr   = `${formatPrintDate(rangeStart)} – ${formatPrintDate(rangeEnd)} calendar for ${userName}`;
+    const exportedAt = new Date().toLocaleString();
+    const footer     = `RonBureau  |  Organisation: ${orgId}  |  User: ${userId}  |  Exported: ${exportedAt}`;
+
+    const isLandscape = viewMode === 'week' || viewMode === 'month';
+    const doc = new jsPDF({ orientation: isLandscape ? 'landscape' : 'portrait', unit: 'mm', format: 'a4' });
+    const PW = isLandscape ? 297 : 210;  // page width
+    const PH = isLandscape ? 210 : 297;  // page height
+    const MAR = 10;
+    const TITLE_H = 14;
+    const FOOT_H  = 8;
+    const BODY_Y  = MAR + TITLE_H;
+    const BODY_H  = PH - BODY_Y - MAR - FOOT_H;
+
+    function drawTitleFooter(pageTitle: string) {
+      // Title
+      doc.setFontSize(11); doc.setFont('helvetica', 'bold');
+      doc.text(pageTitle, MAR, MAR + 8);
+      // Footer line
+      doc.setDrawColor(180); doc.setLineWidth(0.3);
+      doc.line(MAR, PH - MAR - FOOT_H, PW - MAR, PH - MAR - FOOT_H);
+      doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(120);
+      doc.text(footer, MAR, PH - MAR - 2);
+      doc.setTextColor(0);
+    }
+
+    let firstPage = true;
+
+    if (viewMode === 'day') {
+      // ── Day view: one page per day, hourly grid ──────────────────────────────
+      const HOURS = 24;
+      const TIME_W = 18;
+      const EVT_X  = MAR + TIME_W;
+      const EVT_W  = PW - MAR - TIME_W - MAR;
+      const rowH   = BODY_H / HOURS;
+
+      let cur = new Date(rangeStart);
+      while (cur <= rangeEnd) {
+        if (!firstPage) doc.addPage();
+        firstPage = false;
+        const dStr = dateStr(cur);
+        const pageTitle = `${titleStr}  ·  ${formatPrintDate(cur)}`;
+        drawTitleFooter(pageTitle);
+
+        // Draw hour rows
+        doc.setFontSize(6.5); doc.setFont('helvetica', 'normal'); doc.setDrawColor(220);
+        for (let h = 0; h < HOURS; h++) {
+          const y = BODY_Y + h * rowH;
+          doc.setTextColor(140); doc.text(formatHour(h), MAR, y + rowH * 0.65);
+          doc.setDrawColor(220); doc.setLineWidth(0.2); doc.line(MAR + TIME_W - 2, y, PW - MAR, y);
+        }
+        doc.setTextColor(0);
+
+        // Draw events
+        const dayEvts = getEventsForDate(dStr);
+        for (const evt of dayEvts) {
+          const cal = calendars.value.find(c => c.id === evt.calendarId);
+          const color = cal?.color ?? '#3b82f6';
+          const [rr, gg, bb] = hexToRgb(color);
+          const startMin = evt.allDay ? 0  : (parseInt(evt.startTime.split(':')[0]) * 60 + parseInt(evt.startTime.split(':')[1]));
+          const endMin   = evt.allDay ? 1440 : (parseInt(evt.endTime.split(':')[0]) * 60   + parseInt(evt.endTime.split(':')[1]));
+          const y1 = BODY_Y + (startMin / 60) * rowH;
+          const h1 = Math.max(((endMin - startMin) / 60) * rowH, rowH * 0.5);
+          doc.setFillColor(rr, gg, bb); doc.setAlpha ? doc.setAlpha(0.85) : null;
+          doc.roundedRect(EVT_X + 1, y1 + 0.5, EVT_W - 2, h1 - 1, 1, 1, 'F');
+          if (infoLevel !== 'availability' && h1 > 3) {
+            doc.setFontSize(6); doc.setTextColor(255);
+            const lines: string[] = [];
+            if (infoLevel === 'full' || infoLevel === 'title-time') lines.push(evt.title);
+            if (infoLevel === 'title-time' && !evt.allDay) lines.push(`${evt.startTime}–${evt.endTime}`);
+            if (infoLevel === 'full') {
+              if (!evt.allDay) lines.push(`${evt.startTime}–${evt.endTime}`);
+              if (evt.location) lines.push(`📍 ${evt.location}`);
+              if (evt.category) lines.push(`🏷️ ${evt.category}`);
+            }
+            lines.forEach((l, i) => { if (y1 + 2 + i * 3.5 < y1 + h1 - 1) doc.text(l.slice(0, 40), EVT_X + 2, y1 + 2.5 + i * 3.5); });
+            doc.setTextColor(0);
+          }
+        }
+        cur.setDate(cur.getDate() + 1);
+      }
+
+    } else if (viewMode === 'week') {
+      // ── Week view: one page per week, days as rows, 24h columns ─────────────
+      const HOURS = 24;
+      const LABEL_W = 22;
+      const TIME_H  = 6;
+      const rowH    = (BODY_H - TIME_H) / 7;
+      const colW    = (PW - 2 * MAR - LABEL_W) / HOURS;
+
+      // Find first Monday ≤ rangeStart
+      let weekStart = new Date(rangeStart);
+      const dow = weekStart.getDay();
+      weekStart.setDate(weekStart.getDate() - (dow === 0 ? 6 : dow - 1));
+
+      while (weekStart <= rangeEnd) {
+        const weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate() + 6);
+        if (!firstPage) doc.addPage();
+        firstPage = false;
+        drawTitleFooter(titleStr);
+
+        const timeAxisX = MAR + LABEL_W;
+        // Hour headers
+        doc.setFontSize(5.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(120);
+        for (let h = 0; h < HOURS; h++) {
+          doc.text(h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h-12}p`,
+            timeAxisX + h * colW, BODY_Y + TIME_H - 1, { align: 'left' });
+        }
+        doc.setTextColor(0);
+
+        // Day rows
+        for (let d = 0; d < 7; d++) {
+          const day = new Date(weekStart); day.setDate(day.getDate() + d);
+          const dStr = dateStr(day);
+          const y = BODY_Y + TIME_H + d * rowH;
+          const inRange = dStr >= dateStr(rangeStart) && dStr <= dateStr(rangeEnd);
+
+          // Row bg
+          if (!inRange) { doc.setFillColor(248, 248, 248); doc.rect(MAR, y, PW - 2 * MAR, rowH, 'F'); }
+          // Day label
+          doc.setFontSize(6.5); doc.setFont('helvetica', inRange ? 'bold' : 'normal'); doc.setTextColor(inRange ? 0 : 160);
+          doc.text(`${day.toLocaleDateString('en-US', { weekday: 'short' })} ${day.getDate()}`, MAR + 1, y + rowH * 0.6);
+          // Hour grid lines
+          doc.setDrawColor(220); doc.setLineWidth(0.15);
+          for (let h = 0; h <= HOURS; h++) doc.line(timeAxisX + h * colW, y, timeAxisX + h * colW, y + rowH);
+          doc.line(MAR, y + rowH, PW - MAR, y + rowH);
+
+          if (!inRange) continue;
+          // Events
+          const dayEvts = getEventsForDate(dStr);
+          for (const evt of dayEvts) {
+            const cal = calendars.value.find(c => c.id === evt.calendarId);
+            const color = cal?.color ?? '#3b82f6';
+            const [rr, gg, bb] = hexToRgb(color);
+            const startMin = evt.allDay ? 0    : (parseInt(evt.startTime.split(':')[0]) * 60 + parseInt(evt.startTime.split(':')[1]));
+            const endMin   = evt.allDay ? 1440 : (parseInt(evt.endTime.split(':')[0])   * 60 + parseInt(evt.endTime.split(':')[1]));
+            const x1 = timeAxisX + (startMin / 60) * colW;
+            const w1 = Math.max(((endMin - startMin) / 60) * colW, colW * 0.5);
+            doc.setFillColor(rr, gg, bb);
+            doc.roundedRect(x1 + 0.3, y + 1, w1 - 0.6, rowH - 2, 0.8, 0.8, 'F');
+            if (infoLevel !== 'availability' && w1 > 8) {
+              doc.setFontSize(5); doc.setTextColor(255);
+              const label = infoLevel === 'full'
+                ? `${evt.title}${!evt.allDay ? ' ' + evt.startTime : ''}`
+                : evt.title;
+              doc.text(label.slice(0, 20), x1 + 1, y + rowH / 2 + 1.5);
+              doc.setTextColor(0);
+            }
+          }
+        }
+        weekStart.setDate(weekStart.getDate() + 7);
+      }
+
+    } else {
+      // ── Month view: one page per month, 7-column grid ────────────────────────
+      const CELL_LABEL_H = 5;
+      const DAY_HDR_H    = 6;
+      const gridY        = BODY_Y + DAY_HDR_H;
+      const gridH        = BODY_H - DAY_HDR_H;
+      const colW         = (PW - 2 * MAR) / 7;
+      const dayNames     = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+      // Iterate months in range
+      let mDate = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1);
+      const mEnd  = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), 1);
+
+      while (mDate <= mEnd) {
+        if (!firstPage) doc.addPage();
+        firstPage = false;
+        const mLabel = mDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+        drawTitleFooter(`${titleStr}  ·  ${mLabel}`);
+
+        // Day-of-week headers
+        doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(80);
+        dayNames.forEach((n, i) => doc.text(n, MAR + i * colW + colW / 2, BODY_Y + DAY_HDR_H - 1, { align: 'center' }));
+        doc.setTextColor(0);
+
+        // Build month cells (Mon-based)
+        const y = mDate.getFullYear(), mo = mDate.getMonth();
+        const firstDay = new Date(y, mo, 1);
+        const lastDay  = new Date(y, mo + 1, 0);
+        let startDow = firstDay.getDay() - 1; if (startDow < 0) startDow = 6;
+        const cells: Date[] = [];
+        for (let i = startDow - 1; i >= 0; i--) cells.push(new Date(y, mo, -i));
+        for (let d = 1; d <= lastDay.getDate(); d++) cells.push(new Date(y, mo, d));
+        while (cells.length % 7 !== 0 || cells.length < 35) {
+          const prev = cells[cells.length - 1];
+          const next = new Date(prev); next.setDate(next.getDate() + 1);
+          cells.push(next);
+        }
+        const rows = cells.length / 7;
+        const cellH = gridH / rows;
+        const EVT_H = 3.5;
+        const MAX_EVTS = Math.floor((cellH - CELL_LABEL_H - 1) / (EVT_H + 0.5));
+
+        for (let i = 0; i < cells.length; i++) {
+          const cell = cells[i];
+          const col  = i % 7;
+          const row  = Math.floor(i / 7);
+          const cx   = MAR + col * colW;
+          const cy   = gridY + row * cellH;
+          const isThisMonth = cell.getMonth() === mo;
+          const dStr = dateStr(cell);
+
+          // Cell border
+          doc.setDrawColor(200); doc.setLineWidth(0.25);
+          doc.rect(cx, cy, colW, cellH, 'S');
+
+          // Cell bg for out-of-month
+          if (!isThisMonth) { doc.setFillColor(250, 250, 250); doc.rect(cx, cy, colW, cellH, 'F'); }
+
+          // Today highlight
+          if (dStr === dateStr(new Date())) {
+            doc.setFillColor(219, 234, 254); doc.roundedRect(cx + 0.5, cy + 0.5, colW - 1, cellH - 1, 1, 1, 'F');
+          }
+
+          // Date number
+          doc.setFontSize(7); doc.setFont('helvetica', isThisMonth ? 'bold' : 'normal');
+          doc.setTextColor(isThisMonth ? 40 : 180);
+          doc.text(String(cell.getDate()), cx + colW - 2, cy + 4.5, { align: 'right' });
+          doc.setTextColor(0);
+
+          // Events
+          const dayEvts = getEventsForDate(dStr).slice(0, MAX_EVTS);
+          dayEvts.forEach((evt, ei) => {
+            const cal = calendars.value.find(c => c.id === evt.calendarId);
+            const color = cal?.color ?? '#3b82f6';
+            const [rr, gg, bb] = hexToRgb(color);
+            const ey = cy + CELL_LABEL_H + 1 + ei * (EVT_H + 0.5);
+            doc.setFillColor(rr, gg, bb);
+            doc.roundedRect(cx + 1, ey, colW - 2, EVT_H, 0.5, 0.5, 'F');
+            if (infoLevel !== 'availability') {
+              doc.setFontSize(4.5); doc.setTextColor(255);
+              const label = infoLevel === 'full'
+                ? `${evt.allDay ? '' : evt.startTime + ' '}${evt.title}`
+                : evt.title;
+              doc.text(label.slice(0, 22), cx + 2, ey + EVT_H - 1);
+              doc.setTextColor(0);
+            }
+          });
+          const overflow = getEventsForDate(dStr).length - MAX_EVTS;
+          if (overflow > 0) {
+            doc.setFontSize(4.5); doc.setTextColor(100);
+            doc.text(`+${overflow} more`, cx + 2, cy + cellH - 1.5);
+            doc.setTextColor(0);
+          }
+        }
+        mDate.setMonth(mDate.getMonth() + 1);
+      }
+    }
+
+    const fileName = `calendar_${printForm.value.startDate}_${printForm.value.endDate}.pdf`;
+    doc.save(fileName);
+    showPrintModal.value = false;
+  } catch (err: unknown) {
+    printError.value = `Failed to generate PDF: ${err instanceof Error ? err.message : String(err)}`;
+  } finally {
+    isPrinting.value = false;
+  }
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+  const clean = hex.replace('#', '');
+  const num   = parseInt(clean.length === 3
+    ? clean.split('').map(c => c + c).join('')
+    : clean, 16);
+  return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+}
 
 // ─── Persistence ──────────────────────────────────────────────────────────────
 
@@ -1065,6 +2520,9 @@ function saveToStorage() {
   localStorage.setItem('cal_calendars', JSON.stringify(calendars.value));
   localStorage.setItem('cal_events',    JSON.stringify(events.value));
   localStorage.setItem('cal_visibility', JSON.stringify(visibility.value));
+  localStorage.setItem('cal_zoom', String(zoomLevel.value));
+  localStorage.setItem('cal_settings', JSON.stringify(calSettings.value));
+  localStorage.setItem('cal_recycle', JSON.stringify(recycledCalendars.value));
 }
 
 function loadFromStorage() {
@@ -1073,10 +2531,29 @@ function loadFromStorage() {
     const c = localStorage.getItem('cal_calendars');
     const e = localStorage.getItem('cal_events');
     const v = localStorage.getItem('cal_visibility');
+    const z = localStorage.getItem('cal_zoom');
+    const s = localStorage.getItem('cal_settings');
     if (c) calendars.value = JSON.parse(c);
     if (e) events.value    = JSON.parse(e);
     if (v) visibility.value = { ...visibility.value, ...JSON.parse(v) };
+    if (z) zoomLevel.value = Number(z) || 60;
+    if (s) calSettings.value = { ...calSettings.value, ...JSON.parse(s) };
+    const r = localStorage.getItem('cal_recycle');
+    if (r) recycledCalendars.value = JSON.parse(r);
+    // Auto-cleanup expired entries
+    if (calSettings.value.recycleBinDays > 0) {
+      const threshold = Date.now() - calSettings.value.recycleBinDays * 86400000;
+      recycledCalendars.value = recycledCalendars.value.filter(
+        e => new Date(e.deletedAt).getTime() > threshold
+      );
+    }
   } catch { /* ignore corrupt data */ }
+}
+
+function saveSettings() {
+  calSettings.value.myTimezone = normalizeTz(calSettings.value.myTimezone);
+  saveToStorage();
+  showSettingsModal.value = false;
 }
 
 function recordLastAccessed() {
@@ -1092,6 +2569,7 @@ function recordLastAccessed() {
 
 onMounted(() => {
   loadFromStorage();
+  syncAllCalDAV();
   recordLastAccessed();
   // Create a default calendar if none exist
   if (calendars.value.length === 0) {
@@ -1099,6 +2577,62 @@ onMounted(() => {
     saveToStorage();
   }
   importCalId.value = calendars.value[0]?.id ?? '';
+  // Apply settings
+  currentView.value = calSettings.value.defaultView;
+  nextTick(() => scrollToStartHour());
+  // Keyboard shortcuts
+  document.addEventListener('keydown', handleKeydown);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeydown);
+});
+
+function closeTopmostModal() {
+  if (showRawIcsModal.value) { showRawIcsModal.value = false; return; }
+  if (showEventModal.value) { showEventModal.value = false; return; }
+  if (showCalendarModal.value) { showCalendarModal.value = false; return; }
+  if (showCalDAVModal.value) { showCalDAVModal.value = false; return; }
+  if (showImportExportModal.value) { showImportExportModal.value = false; return; }
+  if (showPrintModal.value) { showPrintModal.value = false; return; }
+  if (showSettingsModal.value) { showSettingsModal.value = false; return; }
+  if (showRecycleBinModal.value) { showRecycleBinModal.value = false; return; }
+  if (showDatePicker.value) { showDatePicker.value = false; return; }
+}
+
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    closeTopmostModal();
+  } else if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const tag = (e.target as HTMLElement).tagName.toLowerCase();
+    if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') {
+      if (showEventModal.value) { saveEvent(); }
+      else if (showCalendarModal.value) { saveCalendar(); }
+      else if (showSettingsModal.value) { saveSettings(); }
+    }
+  } else if (e.ctrlKey && e.key === 's') {
+    e.preventDefault();
+    saveToStorage();
+    syncAllCalDAV();
+  } else if (e.ctrlKey && e.shiftKey && e.key === 'Enter') {
+    e.preventDefault();
+    openAddEventModal();
+  } else if (e.ctrlKey && e.key === 'p') {
+    e.preventDefault();
+    openPrintModal();
+  }
+}
+
+const timeGridScrollRef = ref<HTMLElement | null>(null);
+
+function scrollToStartHour() {
+  if (currentView.value !== 'day' && currentView.value !== 'week') return;
+  const el = document.querySelector('.time-grid-scroll') as HTMLElement | null;
+  if (el) el.scrollTop = calSettings.value.startHour * zoomLevel.value;
+}
+
+watch(currentView, (v) => {
+  if (v === 'day' || v === 'week') nextTick(() => scrollToStartHour());
 });
 </script>
 
@@ -1315,7 +2849,8 @@ onMounted(() => {
 .evt-chip:hover { opacity: 0.85; }
 .chip-time { font-size: 0.65rem; opacity: 0.9; flex-shrink: 0; }
 .chip-title { overflow: hidden; text-overflow: ellipsis; flex: 1; }
-.chip-loc, .chip-cat { opacity: 0.85; flex-shrink: 0; }
+.chip-loc { font-size: 0.65rem; opacity: 0.85; min-width: 0; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+.chip-cat { opacity: 0.85; flex-shrink: 0; }
 
 .more-chip {
   font-size: 0.65rem;
@@ -1402,7 +2937,7 @@ onMounted(() => {
   border-right: 1px solid var(--color-border);
 }
 .tg-hour-label {
-  height: 60px;
+  height: var(--hour-px, 60px);
   display: flex;
   align-items: flex-start;
   justify-content: flex-end;
@@ -1420,7 +2955,7 @@ onMounted(() => {
   position: relative;
   border-right: 1px solid var(--color-border);
 }
-.tg-hour-row { height: 60px; border-top: 1px solid var(--color-border); }
+.tg-hour-row { height: var(--hour-px, 60px); border-top: 1px solid var(--color-border); }
 
 .tg-event {
   position: absolute;
@@ -1506,10 +3041,38 @@ onMounted(() => {
 }
 .status-msg.success { background: rgba(34,197,94,0.1); color: var(--color-success); }
 .status-msg.error   { background: rgba(239,68,68,0.1);  color: var(--color-error); }
+.status-msg.warn-msg { background: rgba(234,179,8,0.1); color: var(--color-warning); }
 
 /* Utility */
 .w-full { width: 100%; }
 .btn-sm { padding: 0.4rem 0.75rem; font-size: 0.8rem; }
+
+/* ── CalDAV Wizard ───────────────────────────────────────────────────────────*/
+.modal-wide { max-width: 560px; }
+.wizard-steps {
+  display: flex; align-items: center; gap: 0.4rem;
+  margin: 0.5rem 0 1rem; flex-wrap: wrap;
+}
+.wizard-step {
+  font-size: 0.78rem; font-weight: 500; color: var(--color-text-muted);
+  padding: 0.2rem 0.5rem; border-radius: 20px;
+  border: 1px solid var(--color-border);
+}
+.wizard-step.active { color: var(--color-primary); border-color: var(--color-primary); background: rgba(59,130,246,0.07); font-weight: 700; }
+.wizard-step.done   { color: var(--color-success);  border-color: var(--color-success);  background: rgba(34,197,94,0.07); }
+.wizard-sep { font-size: 0.8rem; color: var(--color-text-muted); }
+
+.cd-calendar-list { display: flex; flex-direction: column; gap: 0.5rem; max-height: 280px; overflow-y: auto; margin: 0.5rem 0; }
+.cd-calendar-row  { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.5rem; border-radius: var(--radius); border: 1px solid var(--color-border); }
+.cd-cal-check     { display: flex; align-items: center; }
+.cd-cal-name      { flex: 1; min-width: 0; }
+.cd-mode-label    { display: flex; align-items: center; gap: 0.3rem; font-size: 0.78rem; white-space: nowrap; cursor: pointer; color: var(--color-text); }
+.cd-mode-disabled { opacity: 0.45; pointer-events: none; }
+
+.cd-summary-list { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.5rem 0; }
+.cd-summary-row  { display: flex; align-items: center; gap: 0.6rem; font-size: 0.875rem; }
+.cd-sum-name     { flex: 1; font-weight: 500; }
+.cd-sum-badge    { font-size: 0.75rem; color: var(--color-text-muted); }
 
 /* ── Print ───────────────────────────────────────────────────────────────────*/
 @media print {
@@ -1527,4 +3090,109 @@ onMounted(() => {
   .form-grid { grid-template-columns: 1fr; }
   .form-grid .full { grid-column: 1; }
 }
+
+/* ── Zoom slider ─────────────────────────────────────────────────────────────*/
+.zoom-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0; }
+.zoom-row label { font-size: 0.78rem; color: var(--color-text-muted); white-space: nowrap; }
+.zoom-slider { flex: 1; accent-color: var(--color-primary); cursor: pointer; }
+.zoom-value { font-size: 0.75rem; color: var(--color-text-muted); white-space: nowrap; min-width: 3ch; text-align: right; }
+
+/* ── Sidebar header actions (show all / hide all) ────────────────────────────*/
+.sidebar-hdr-actions { display: flex; gap: 0.35rem; }
+.link-btn {
+  background: none; border: none; cursor: pointer;
+  font-size: 0.72rem; color: var(--color-primary);
+  padding: 0.15rem 0.3rem; border-radius: var(--radius);
+  white-space: nowrap;
+}
+.link-btn:hover { background: var(--color-primary-hover, rgba(0,0,0,0.06)); }
+
+/* ── CalDAV select-all row ───────────────────────────────────────────────────*/
+.cd-selall-row { display: flex; gap: 0.5rem; margin-bottom: 0.25rem; }
+
+/* ── Export calendar checkboxes ──────────────────────────────────────────────*/
+.ie-export-header { margin-bottom: 0.3rem; }
+.ie-export-cals { display: flex; flex-direction: column; gap: 0.25rem; max-height: 180px; overflow-y: auto; margin-bottom: 0.75rem; border: 1px solid var(--color-border); border-radius: var(--radius); padding: 0.4rem 0.6rem; }
+.ie-cal-opt { display: flex; align-items: center; gap: 0.4rem; font-size: 0.875rem; cursor: pointer; }
+.checkbox-inline { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.875rem; }
+.cal-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+/* ── Text wrap in event tiles ────────────────────────────────────────────────*/
+.tge-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tge-title.text-wrap { white-space: normal; overflow: visible; text-overflow: unset; word-break: break-word; }
+.chip-title.text-wrap { white-space: normal; overflow: visible; text-overflow: unset; word-break: break-word; }
+
+/* ── Settings modal ──────────────────────────────────────────────────────────*/
+.settings-hour-row { display: flex; align-items: center; gap: 0.5rem; }
+.settings-hour-row .zoom-slider { flex: 1; }
+.hint { font-size: 0.75rem; color: var(--color-text-muted); font-weight: 400; display: block; margin-top: 0.2rem; }
+
+/* ── CalDAV wizard calendar timezone field ───────────────────────────────────*/
+.cd-cal-tz { width: 140px; flex-shrink: 0; font-size: 0.75rem; }
+
+/* ── Font size variable ───────────────────────────────────────────────────────*/
+.tge-title, .tge-time, .tge-loc, .tge-cat, .chip-title, .chip-time {
+  font-size: var(--event-font-size, 12px);
+}
+
+/* ── Recycle bin ─────────────────────────────────────────────────────────────*/
+.recycle-btn { color: var(--color-danger, #ef4444) !important; margin-top: 0.25rem; }
+.recycle-list { display: flex; flex-direction: column; gap: 0.5rem; max-height: 300px; overflow-y: auto; }
+.recycle-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0; border-bottom: 1px solid var(--color-border); }
+.recycle-name { flex: 1; font-weight: 500; }
+.recycle-meta { font-size: 0.75rem; color: var(--color-text-muted); }
+.recycle-age { font-size: 0.75rem; color: var(--color-text-muted); white-space: nowrap; }
+
+/* ── Date picker popup ───────────────────────────────────────────────────────*/
+.date-picker-overlay { position: fixed; inset: 0; z-index: 900; }
+.date-picker-popup {
+  position: absolute;
+  top: 70px; left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+  padding: 0.75rem;
+  width: 260px;
+  z-index: 901;
+}
+.dp-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.4rem; }
+.dp-title { font-weight: 600; font-size: 0.875rem; }
+.dp-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-size: 0.7rem; color: var(--color-text-muted); margin-bottom: 0.2rem; }
+.dp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; }
+.dp-cell {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 2px 0; cursor: pointer; border-radius: 4px;
+  min-height: 32px;
+}
+.dp-cell:hover { background: var(--color-primary-hover, rgba(0,0,0,0.07)); }
+.dp-today .dp-num { color: var(--color-primary); font-weight: 700; }
+.dp-selected { background: var(--color-primary) !important; }
+.dp-selected .dp-num { color: white; }
+.dp-other .dp-num { color: var(--color-text-muted); opacity: 0.5; }
+.dp-num { font-size: 0.75rem; line-height: 1.4; }
+.dp-dots { display: flex; gap: 2px; flex-wrap: wrap; justify-content: center; min-height: 6px; }
+.dp-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+.date-picker-btn { font-size: 0.85rem; }
+
+/* ── Event modal tabs ────────────────────────────────────────────────────────*/
+.evt-tabs {
+  display: flex; gap: 2px; margin-bottom: 0.75rem;
+  border-bottom: 2px solid var(--color-border);
+}
+.evt-tab {
+  background: none; border: none; cursor: pointer;
+  padding: 0.4rem 0.8rem; font-size: 0.8rem;
+  color: var(--color-text-muted);
+  border-bottom: 2px solid transparent; margin-bottom: -2px;
+  border-radius: var(--radius) var(--radius) 0 0;
+  transition: color 0.15s, border-color 0.15s;
+}
+.evt-tab:hover { color: var(--color-text); }
+.evt-tab.active { color: var(--color-primary); border-bottom-color: var(--color-primary); font-weight: 600; }
+
+/* ── Raw ICS textarea ────────────────────────────────────────────────────────*/
+.ics-textarea { font-family: monospace; font-size: 0.78rem; line-height: 1.4; resize: vertical; }
+
 </style>

@@ -115,13 +115,13 @@ The frontend will be available at `http://localhost:3000`.
 
 After running the seed script, the following test users will be available:
 
-| User ID    | Password      | Type               | Status    |
-|------------|---------------|-------------------|-----------|
-| admin      | password123   | Administrator     | Active    |
-| owner      | password123   | Organization Owner| Active    |
-| user1      | password123   | User              | Active    |
-| suspended  | password123   | User              | Suspended |
-| expired    | password123   | User              | Expired   |
+| User ID   | Password    | Type               | Status    |
+|-----------|-------------|--------------------|-----------|
+| admin     | password123 | Administrator      | Active    |
+| owner     | password123 | Organization Owner | Active    |
+| user1     | password123 | User               | Active    |
+| suspended | password123 | User               | Suspended |
+| expired   | password123 | User               | Expired   |
 
 ## User Schema
 
