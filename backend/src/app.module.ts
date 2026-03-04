@@ -4,8 +4,9 @@ import { UsersModule } from './users/users.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { MapsModule } from './maps/maps.module';
 import { CalDavModule } from './caldav/caldav.module';
+import { EmailModule } from './email/email.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, UsersModule, MapsModule, CalDavModule],
+  imports: [PrismaModule, AuthModule, UsersModule, MapsModule, CalDavModule, EmailModule],
 })
 export class AppModule {}
