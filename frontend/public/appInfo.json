@@ -1,6 +1,14 @@
 {
   "apps": [
     {
+      "id": "email",
+      "name": "Email",
+      "description": "Multi-account email client with IMAP/SMTP support, folders, search, filters, and Thunderbird-style interface",
+      "icon": "📧",
+      "path": "/email",
+      "keywords": ["email", "mail", "inbox", "imap", "smtp", "compose", "send", "receive", "thunderbird"]
+    },
+    {
       "id": "calendar",
       "name": "Calendar",
       "description": "Multi-calendar app with day/week/month views, events, CalDAV support, and ICS import/export",
