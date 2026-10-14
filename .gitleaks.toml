@@ -1,0 +1,45 @@
+# Gitleaks configuration for ronBureau.
+# Docs: https://github.com/gitleaks/gitleaks
+#
+# Keeps the built-in rule set and adds project-specific rules for the
+# routing/tile API keys this project uses. Placeholders that are *meant* to be
+# committed (in .env.example) are explicitly allowlisted below.
+
+title = "ronBureau gitleaks config"
+
+[extend]
+# Inherit the upstream default rules; do not replace them.
+useDefault = true
+
+[allowlist]
+description = "Documented placeholders and non-secret example values"
+
+# These literal strings are placeholders, never real credentials. A real key
+# placed in .env.example (or anywhere else) will still be flagged because the
+# file path is intentionally NOT allowlisted.
+regexes = [
+  '''your_graphhopper_api_key''',
+  '''get_your_free_key_at_https://maptiler\.com''',
+  '''your-super-secret-jwt-key-change-in-production''',
+  '''your-secret-key''',
+  '''YOUR_KEY_HERE''',
+  '''optional-key''',
+]
+
+# --- Project-specific rules ---------------------------------------------------
+
+[[rules]]
+id = "graphhopper-api-key-in-url"
+description = "GraphHopper API key embedded in a request URL"
+# Catches e.g. graphhopper.com/api/1/route?...&key=<key>
+regex = '''graphhopper\.com/[^\s"'`]*[?&]key=([A-Za-z0-9-]{20,})'''
+secretGroup = 1
+keywords = ["graphhopper.com"]
+
+[[rules]]
+id = "graphhopper-api-key-assignment"
+description = "GraphHopper API key assigned to a variable or env var"
+# Catches e.g. GRAPHHOPPER_API_KEY="<32-char key>" or a UUID-form key.
+regex = '''(?i)GRAPHHOPPER_API_KEY\s*[=:]\s*["']?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[A-Za-z0-9]{32})["']?'''
+secretGroup = 1
+keywords = ["GRAPHHOPPER_API_KEY"]

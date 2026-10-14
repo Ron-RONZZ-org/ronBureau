@@ -168,6 +168,25 @@ Quick deployment:
 sudo ./deploy.sh
 ```
 
+## Security
+
+### Secrets
+
+Never commit real credentials. `.env.example` files are tracked templates — they
+must contain **placeholders only** (see `frontend/.env.example`); the real values
+live in untracked `.env` files.
+
+Committed secrets are scanned automatically:
+
+- **CI** — `.github/workflows/secret-scan.yml` runs [gitleaks](https://github.com/gitleaks/gitleaks)
+  over the full history on every push and pull request, using the rules in `.gitleaks.toml`.
+- **Locally** — `lefthook.yml` runs the same scan pre-commit and pre-push when the
+  `gitleaks` binary is installed.
+
+**If a secret is ever committed:** treat it as compromised and **rotate it
+immediately** — rewriting history does not un-leak it. Then purge it from history
+and notify the maintainers so cached refs on GitHub can be cleaned up.
+
 ## License
 
 ISC

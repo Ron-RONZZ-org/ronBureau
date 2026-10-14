@@ -1,0 +1,25 @@
+# Local secret scanning, mirroring .github/workflows/secret-scan.yml.
+#
+# Requires the `gitleaks` binary on PATH (https://github.com/gitleaks/gitleaks#installing).
+# If it is not installed the hooks print a notice and pass — CI still scans every
+# push and pull request, so a leak can never land on the remote unnoticed.
+
+pre-commit:
+  commands:
+    gitleaks-staged:
+      run: |
+        if command -v gitleaks >/dev/null 2>&1; then
+          gitleaks git --staged --config .gitleaks.toml --redact --no-banner
+        else
+          echo "gitleaks not installed; skipping local secret scan (CI will still scan)"
+        fi
+
+pre-push:
+  commands:
+    gitleaks-branch:
+      run: |
+        if command -v gitleaks >/dev/null 2>&1; then
+          gitleaks git . --config .gitleaks.toml --redact --no-banner
+        else
+          echo "gitleaks not installed; skipping local secret scan (CI will still scan)"
+        fi
